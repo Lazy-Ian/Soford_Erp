@@ -1,0 +1,21 @@
+services:
+  api:
+    build:
+      context: ./SofordRepApi
+    env_file:
+      - .env
+    volumes:
+      - soford_api_data:/app/App_Data
+    ports:
+      - "5153:8080"
+
+  web:
+    build:
+      context: ./WebSofordRep
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+volumes:
+  soford_api_data:

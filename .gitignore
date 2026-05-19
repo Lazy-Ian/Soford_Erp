@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/App_Data/
+*.user
+*.suo
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.playwright-mcp/
