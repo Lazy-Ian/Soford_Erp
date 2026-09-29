@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 
 public class AlibabaProtocolTests
 {
@@ -84,6 +85,27 @@ public class AlibabaProtocolTests
     public void ExtractCode_AcceptsCodeOrCallbackUrl(string input, string expected)
     {
         Assert.Equal(expected, ApiEndpoints.ExtractCode(input));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("https://oauth.alibaba.com/authorize")]
+    public void AuthorizeUrl_UsesIcbuOpenPlatformConsentPage(string? configured)
+    {
+        var config = new Microsoft.Extensions.Configuration.ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Alibaba:AppKey"] = "502622",
+            ["Alibaba:OAuthAuthorizeUrl"] = configured
+        }).Build();
+        var settings = AlibabaSettings.FromConfiguration(config);
+
+        var url = AlibabaOAuth.BuildAuthorizeUrl(settings, "https://erp.soford.cn/openapi/callback", "s1");
+
+        Assert.StartsWith("https://openapi-auth.alibaba.com/oauth/authorize?", url);
+        Assert.Contains("client_id=502622", url);
+        Assert.Contains("redirect_uri=https%3A%2F%2Ferp.soford.cn%2Fopenapi%2Fcallback", url);
+        Assert.Contains("force_auth=true", url);
+        Assert.DoesNotContain("sp=", url);
     }
 
     [Fact]

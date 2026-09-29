@@ -122,11 +122,10 @@ public static class AlibabaOAuth
         var parameters = new Dictionary<string, string>
         {
             ["response_type"] = "code",
+            ["force_auth"] = "true",
             ["client_id"] = settings.AppKey ?? "",
             ["redirect_uri"] = callbackUrl,
-            ["state"] = state,
-            ["view"] = "web",
-            ["sp"] = settings.OAuthSp
+            ["state"] = state
         };
         return $"{settings.OAuthAuthorizeUrl}?{string.Join("&", parameters.Select(x => $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(x.Value)}"))}";
     }

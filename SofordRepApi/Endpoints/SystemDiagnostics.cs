@@ -39,9 +39,12 @@ public sealed class SystemDiagnostics(
         }
 
         var callback = AlibabaOAuth.BuildCallbackUrl(settings, http);
-        checks.Add(new("callback", "授权回调地址", callback.StartsWith("https://") || env.IsDevelopment() ? Ok : Warn,
+        var isLocal = Uri.TryCreate(callback, UriKind.Absolute, out var callbackUri) && callbackUri.IsLoopback;
+        checks.Add(new("callback", "授权回调地址", callback.StartsWith("https://") && !isLocal ? Ok : Warn,
             callback,
-            "该地址必须与 Alibaba App Console 中登记的回调地址完全一致；本地环境可使用「粘贴回调链接」方式授权。"));
+            isLocal
+                ? "Alibaba 只接受 App Console 登记的回调地址，localhost 会被拒绝。请设置 Alibaba__OAuthCallbackUrl=https://erp.soford.cn/openapi/callback，授权后用「粘贴回调链接」方式完成。"
+                : "该地址必须与 Alibaba App Console 中登记的回调地址完全一致；本地环境授权后可用「粘贴回调链接」方式完成。"));
         checks.Add(CheckDataPath());
         return checks;
     }

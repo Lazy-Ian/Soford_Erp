@@ -16,6 +16,9 @@ public sealed record AlibabaSettings(
 {
     public const string DefaultGatewayUrl = "https://openapi-api.alibaba.com/rest";
 
+    /// <summary>Seller consent page of the ICBU open platform (the legacy oauth.alibaba.com rejects these app keys).</summary>
+    public const string DefaultAuthorizeUrl = "https://openapi-auth.alibaba.com/oauth/authorize";
+
     public bool HasCredentials => !string.IsNullOrWhiteSpace(AppKey) && !string.IsNullOrWhiteSpace(AppSecret);
 
     public static AlibabaSettings FromConfiguration(IConfiguration config)
@@ -26,7 +29,7 @@ public sealed record AlibabaSettings(
             gateway.TrimEnd('/'),
             config["Alibaba:AppKey"]?.Trim(),
             config["Alibaba:AppSecret"]?.Trim(),
-            FirstNonEmpty(config["Alibaba:OAuthAuthorizeUrl"]) ?? "https://oauth.alibaba.com/authorize",
+            NormalizeAuthorizeUrl(FirstNonEmpty(config["Alibaba:OAuthAuthorizeUrl"])),
             FirstNonEmpty(config["Alibaba:OAuthCallbackUrl"]),
             FirstNonEmpty(config["Alibaba:OAuthSuccessRedirect"]) ?? "http://localhost:5173/",
             FirstNonEmpty(config["Alibaba:OAuthSp"]) ?? "icbu",
@@ -48,6 +51,12 @@ public sealed record AlibabaSettings(
 
         return result;
     }
+
+    // Old configs point at the TOP-era endpoint, which answers "appkey不存在" for open-platform apps.
+    private static string NormalizeAuthorizeUrl(string? configured) =>
+        configured is null || configured.Contains("oauth.alibaba.com", StringComparison.OrdinalIgnoreCase)
+            ? DefaultAuthorizeUrl
+            : configured;
 
     private static string? FirstNonEmpty(params string?[] values) => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
 
