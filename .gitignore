@@ -9,4 +9,9 @@
 .env.*
 !.env.example
 npm-debug.log*
+.publish/
+soford-erp-server.zip
+.api*.log
+.web*.log
+.local-logs/
 .playwright-mcp/

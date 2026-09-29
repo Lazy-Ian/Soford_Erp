@@ -1,0 +1,67 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+/// <summary>Resolves the data directory (Soford:DataPath, default ContentRoot/App_Data).</summary>
+public sealed class AppPaths
+{
+    public AppPaths(string dataPath)
+    {
+        DataPath = Path.GetFullPath(Environment.ExpandEnvironmentVariables(dataPath));
+        Directory.CreateDirectory(DataPath);
+    }
+
+    public string DataPath { get; }
+
+    public string File(params string[] segments) => Path.Combine([DataPath, .. segments]);
+
+    public static AppPaths FromConfiguration(IConfiguration config, IHostEnvironment env)
+    {
+        var configured = config["Soford:DataPath"];
+        var path = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(env.ContentRootPath, "App_Data")
+            : Path.IsPathRooted(configured) ? configured : Path.Combine(env.ContentRootPath, configured);
+        return new AppPaths(path);
+    }
+}
+
+public static class JsonFile
+{
+    public static readonly JsonSerializerOptions Options = CreateOptions();
+
+    private static JsonSerializerOptions CreateOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true };
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
+
+    public static async Task<T?> ReadAsync<T>(string path)
+    {
+        if (!System.IO.File.Exists(path))
+        {
+            return default;
+        }
+
+        await using var stream = System.IO.File.OpenRead(path);
+        if (stream.Length == 0)
+        {
+            return default;
+        }
+
+        return await JsonSerializer.DeserializeAsync<T>(stream, Options);
+    }
+
+    /// <summary>Writes to a temp file first, then atomically replaces the target so a crash never leaves a truncated file.</summary>
+    public static async Task WriteAtomicAsync<T>(string path, T value)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        await using (var stream = System.IO.File.Create(temp))
+        {
+            await JsonSerializer.SerializeAsync(stream, value, Options);
+            await stream.FlushAsync();
+        }
+
+        System.IO.File.Move(temp, path, overwrite: true);
+    }
+}

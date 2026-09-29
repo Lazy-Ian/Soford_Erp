@@ -1,0 +1,15 @@
+[Unit]
+Description=Soford ERP API
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/soford-erp/api
+ExecStart=/usr/bin/dotnet /opt/soford-erp/api/SofordRepApi.dll
+Restart=always
+RestartSec=5
+SyslogIdentifier=soford-erp-api
+User=www-data
+EnvironmentFile=/opt/soford-erp/env/soford-api.env
+
+[Install]
+WantedBy=multi-user.target

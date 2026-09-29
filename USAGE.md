@@ -1,166 +1,69 @@
 # Soford ERP 使用说明
 
-本系统用于导入商品、质检商品、调用 Alibaba OpenAPI，并完成商品创建、更新、库存价格同步和发布流程。
+访问地址：本地 `http://localhost:5173/`，生产 `https://erp.soford.cn/`。
 
-本地访问地址：
+## 1. 连接 Alibaba 店铺（首次使用）
 
-```text
-http://localhost:5173/
-```
+进入顶部「店铺连接」：
 
-## 1. 初始化配置
+1. **连接自检**会逐项检查：AppKey/AppSecret、Alibaba 网关、签名、店铺授权、接口权限、回调地址、数据目录。红色项下方会给出处理方法。
+2. **授权店铺**：
+   - 服务器环境：点「授权 Alibaba 店铺」，登录卖家账号并同意授权，自动回到系统。
+   - 本地环境：同样点击授权，登录后浏览器会跳到 `https://erp.soford.cn/openapi/callback?code=…`（页面打不开也没关系），复制地址栏整条链接，粘贴到「方式二」输入框，点「换取 Token」。code 30 分钟内有效、只能用一次。
+3. 授权成功后右上角显示「店铺已连接」。Token 到期前系统自动续期；也可以手动「立即续期」。
 
-打开页面后先查看右上角状态：
+## 2. 准备商品
 
-- `API configured`：Alibaba 配置基本完整。
-- `API incomplete`：缺少 AppKey、AppSecret、Token 或发布接口配置。
+- **下载模板**：商品页点「模板」，得到 `.xlsx`，第二个工作表是每一列的填写说明。
+- **导入**：点「导入」或把文件拖到工具栏。按 SKU 匹配：已存在的商品会被更新，且保留 Alibaba 商品 ID 和发布状态。导入报告会列出新增/更新/跳过数量和逐行警告。
+- **新建/编辑**：点商品标题或铅笔图标。编辑页分为基础信息、类目与属性、价格与库存、物流、图片五个区域。
+  - 图片最多 6 张，第一张为主图，可调整顺序；可粘贴 URL，或「上传本地图片」到 Alibaba 图片银行。
+  - 阶梯价须按数量递增、价格递减；填写阶梯价后单价不再使用。
+  - 「发布报文」可查看系统将发送给 Alibaba 的 `product_info` 内容。
 
-如果还没有授权 Token：
+## 3. 质检与类目
 
-1. 在 Alibaba 授权页面完成卖家授权。
-2. 拿到回调里的 `code`。
-3. 粘贴到页面里的 `Authorization code`。
-4. 点击 `Create Token`。
-5. 后续 Token 快过期时点击 `Refresh Token`。
+- 保存和导入时自动质检，列表「质检」列显示阻断/建议数量，点击查看明细。
+- **阻断**必须修复才能发布（如缺标题、价格为 0、无图片、类目必填属性未填）；**建议**不影响发布。
+- **预测类目**：勾选商品点「预测类目」，Alibaba 会根据标题/描述/主图推荐叶子类目并自动填入。
+- **类目属性**：在编辑页点「加载类目属性」，必填属性会自动加入并标红，有可选值的属性提供下拉建议。
 
-生产回调地址：
+## 4. 发布
 
-```text
-https://erp.soford.cn/openapi/callback
-```
+1. 勾选商品，点「发布到 Alibaba」，确认后在后台执行，页面显示进度条。
+2. 未发布过的商品走「新建」，已有 Alibaba 商品 ID 的走「更新」。
+3. 结果：
+   - 成功：写入 Alibaba 商品 ID，状态变为「审核中」，并自动查询一次上架状态。
+   - 失败：状态「发布失败」，显示 Alibaba 错误码和中文说明（如图片链接无效、阶梯价顺序错误）。
+   - 有阻断问题的商品会被跳过并列出原因。
+4. 所有发布记录在「发布任务」页，可展开查看每个商品的结果。
 
-## 2. 导入商品
+## 5. 发布后的维护
 
-点击顶部 `Import` 上传 `.xlsx` 或 `.csv` 商品表。
+勾选已发布商品（带 Alibaba 商品 ID）后可以：
 
-也可以把文件拖到页面里的导入区域。
+| 操作 | 说明 |
+|------|------|
+| 同步状态 | 查询 Alibaba 上的状态：审核中 / 已上架 / 审核未通过（含原因） |
+| 同步库存 | 把本地库存写到 Alibaba |
+| 同步价格 | 把本地价格/阶梯价写到 Alibaba（仅支持 USD） |
+| 上架 / 下架 | 批量改变 Alibaba 上架状态 |
 
-点击 `Template` 可以下载 CSV 模板。
+修改商品信息后再次「发布到 Alibaba」即为更新。
 
-模板字段：
+## 6. 其他
 
-```text
-Sku, Title, CategoryId, Currency, Price, MOQ, Stock,
-LeadTimeDays, MainImageUrl, DetailImageUrls, Keywords,
-Attributes, Description
-```
+- **导出 CSV**：导出选中商品（未选则全部），可用于备份或手工上传。
+- **删除**：只删除本系统数据，不影响 Alibaba 上已发布的商品。
+- **API 日志**：每次调用 Alibaba 的记录，含脱敏后的请求参数、响应、错误码和 request_id，排查问题时提供 request_id 给 Alibaba 支持。
+- **API 调试**：高级功能，直接调用已登记的接口并查看原始响应。
 
-导入后商品会出现在商品表格中。
+## 常见问题
 
-## 3. 商品质检
-
-勾选商品后可以执行：
-
-- `Quality`：检查商品标题、类目、价格、MOQ、库存、图片、关键词、属性等。
-- `Preflight`：发布前检查，不会真正调用 Alibaba 发布接口。
-
-如果商品有阻断问题，会显示在 `Issues` 列。点击问题数量可以查看详情。
-
-## 4. Alibaba 商品发布闭环
-
-勾选一个或多个商品后，建议按顺序操作：
-
-1. `Predict Category`
-   根据标题、描述、图片预测 Alibaba 类目。
-
-2. `Query Attributes`
-   根据商品 `CategoryId` 查询类目属性要求。
-
-3. `Create Listing`
-   创建 Alibaba 商品。
-
-4. `Update Listing`
-   更新 Alibaba 商品信息。
-
-5. `Query Status`
-   查询远端商品状态。
-
-6. `Sync Inventory`
-   同步库存。
-
-7. `Sync Price`
-   同步价格。
-
-8. `Batch Publish`
-   批量发布选中商品。发布前建议先点 `Preflight`。
-
-## 5. 图片功能
-
-在 `Images` 区域：
-
-- `Upload Image`：上传图片到 Alibaba 图片库。
-- `Group List Payload`：快速填充图片分组查询参数，然后在 `API Workbench` 中点击 `Call API`。
-
-上传结果会显示在 API 返回区域。
-
-## 6. 视频功能
-
-在 `Videos` 区域：
-
-- `Query Videos`：填充视频列表查询参数。
-- `Main Video Payload`：填充商品主视频关联参数。
-
-填充后需要在 `API Workbench` 点击 `Call API` 执行。
-
-## 7. API Workbench 高级调用
-
-`API Workbench` 用来直接测试 Alibaba API。
-
-使用方式：
-
-1. 在 `API` 下拉框选择接口，例如：
-   - `category.predict`
-   - `product.get`
-   - `product.update`
-   - `product.search`
-   - `photobank.group.list`
-   - `video.query`
-
-2. 在 `Payload JSON` 中填写参数。
-
-3. 点击 `Call API`。
-
-返回结果会显示在下方黑色代码区域。
-
-## 8. 日志和任务
-
-页面底部有两块：
-
-- `Publish Jobs`：显示预检、导出、发布任务记录。
-- `API Logs`：显示最近 Alibaba API 调用记录，包括接口、状态码、traceId。
-
-## 9. CSV 备用导出
-
-如果 Alibaba API 未配置完整，或发布接口无权限，可以点击：
-
-```text
-CSV Fallback
-```
-
-系统会导出商品 CSV，便于人工上传或备用处理。
-
-## 10. 推荐操作流程
-
-日常发布商品建议按这个顺序：
-
-```text
-导入商品
--> 勾选商品
--> Quality
--> Predict Category
--> 填好 CategoryId
--> Query Attributes
--> 补齐属性
--> Preflight
--> Upload Image
--> Create Listing / Batch Publish
--> Query Status
--> Sync Inventory / Sync Price
-```
-
-## 11. 注意事项
-
-- 必须先完成 Alibaba 授权 Token，否则所有需要 token 的接口都会失败。
-- `AppKey`、`AppSecret`、Token 等敏感信息应放在 `.env` 或服务器环境变量中，不要提交到代码仓库。
-- 商品创建和更新接口对字段要求严格，如果 Alibaba 返回字段错误，需要根据返回结果继续调整商品 payload 映射。
-- 容器部署时，`App_Data` 必须使用持久化卷，否则 token、日志和商品数据会在容器重建后丢失。
+| 现象 | 处理 |
+|------|------|
+| 自检「签名校验」失败 | AppSecret 错误，到 App Console 复制正确值后重启 API |
+| 自检「Alibaba 网关」失败 | `Alibaba__BaseUrl` 应为 `https://openapi-api.alibaba.com/rest` |
+| 换取 Token 提示 InvalidCode | code 已用过或超过 30 分钟，重新授权 |
+| 接口提示无权限 | 在 App Console 为应用申请该接口的权限包 |
+| 发布提示图片无效 | 图片必须是公网可访问的 https 地址，建议先上传到图片银行 |

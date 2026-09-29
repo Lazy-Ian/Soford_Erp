@@ -1,115 +1,63 @@
 # Soford ERP
 
-Production-oriented ERP workspace for importing real product spreadsheets, checking Alibaba listing quality, and publishing in batches.
+Alibaba.com 国际站（ICBU）商品发布工作台：导入/录入商品 → 质检 → 类目预测与属性补全 → 发布 → 状态回写 → 价格库存同步、上下架。
 
-## Projects
+文档：[产品需求](docs/01-产品需求.md) · [技术方案](docs/02-技术方案.md) · [实施计划与验收](docs/03-实施计划.md) · [使用说明](USAGE.md)
 
-- `SofordRepApi`: ASP.NET Core 8 API. Stores imported products in `App_Data/products.json`.
-- `WebSofordRep`: React + Vite console.
-- `QRSofordRep`: reserved for QR/mobile workflows.
+## 项目结构
 
-## Local Run
+| 目录 | 说明 |
+|------|------|
+| `SofordRepApi` | ASP.NET Core 8 API。`Alibaba/` IOP 客户端与签名，`Catalog/` 商品、导入、质检，`Publishing/` 后台发布队列，`Endpoints/` 路由 |
+| `SofordRepApi.Tests` | xUnit 单元测试（签名、响应解析、报文映射、导入、质检、仓储） |
+| `WebSofordRep` | React + Vite 前端（中文界面） |
+| `deploy/` | Ubuntu 无 Docker 部署（Nginx + systemd） |
 
-```powershell
-cd D:\project\web\Soford_Erp\SofordRepApi
-dotnet run --urls http://localhost:5153
+数据保存在 `App_Data`（或 `Soford__DataPath`）：`products.json`、`publish-jobs.json`、`alibaba-token.json`（加密）、`alibaba-api-logs.json`、`category-attributes.json`。
 
-cd D:\project\web\Soford_Erp\WebSofordRep
-npm install
-npm run dev
-```
+## 本地运行
 
-Open `http://localhost:5173`.
-
-## Alibaba Configuration
-
-No publish request is simulated. If Alibaba settings are missing, the API blocks publishing and writes a fallback CSV export.
-
-Set these values with environment variables, user secrets, or production configuration:
+1. 在仓库根目录创建 `.env`（可复制 `.env.example`），填入 `Alibaba__AppKey`、`Alibaba__AppSecret`。
+   开发环境下 API 会自动读取这个文件，无需再设置环境变量。
+2. 启动：
 
 ```powershell
-$env:Alibaba__BaseUrl="https://..."
-$env:Alibaba__ProductPublishPath="/..."
-$env:Alibaba__AuthBaseUrl="https://openapi.alibaba.com/rest"
-$env:Alibaba__AuthTokenCreatePath="/auth/token/create"
-$env:Alibaba__AuthTokenRefreshPath="/auth/token/refresh"
-$env:Alibaba__ApiVersion="2.0"
-$env:Alibaba__DefaultRestMethod="alibaba.open.api.call"
-$env:Alibaba__ProductPayloadParameter="product_payload"
-$env:Alibaba__AppKey="..."
-$env:Alibaba__AppSecret="..."
+powershell -ExecutionPolicy Bypass -File .\start-local.ps1
 ```
 
-Use the real endpoint/path granted to the Alibaba.com Open Platform app. Alibaba's public docs and App Console make clear that apps, APIs and permissions are managed through the Open Platform console, and product publishing access depends on the permission granted to that app. Free-tier or test apps may not have product publishing permission; in that case use the built-in preflight and CSV export workflow until the app is approved.
-
-After the seller authorization callback returns a real `code`, open the console and submit it in the Alibaba token panel. The backend calls `/auth/token/create`, stores the returned `access_token` and `refresh_token` under `SofordRepApi/App_Data/alibaba-token.json`, and uses that access token for publish calls.
-
-OAuth callback is also available at:
-
-`GET /api/integrations/alibaba/oauth/callback?code=...&state=...`
-
-Set `Alibaba__OAuthSuccessRedirect` to your frontend URL after deployment.
-
-## Alibaba API Registry
-
-The backend exposes a signed generic Alibaba OpenAPI caller plus business wrappers. Configure the real method names granted in App Console:
+或分别启动：
 
 ```powershell
-$env:Alibaba__Apis__category.tree__Method="..."
-$env:Alibaba__Apis__category.attributes__Method="..."
-$env:Alibaba__Apis__image.upload__Method="..."
-$env:Alibaba__Apis__product.create__Method="..."
-$env:Alibaba__Apis__product.update__Method="..."
-$env:Alibaba__Apis__product.get__Method="..."
-$env:Alibaba__Apis__product.offline__Method="..."
-$env:Alibaba__Apis__product.delete__Method="..."
-$env:Alibaba__Apis__order.search__Method="..."
-$env:Alibaba__Apis__order.detail__Method="..."
-$env:Alibaba__Apis__logistics.freightTemplates__Method="..."
-$env:Alibaba__Apis__logistics.shipment.create__Method="..."
+cd SofordRepApi; dotnet run --urls http://localhost:5153
+cd WebSofordRep; npm install; npm run dev
 ```
 
-Available local wrappers:
+打开 `http://localhost:5173`，默认账号 `admin` / `admin123`（仅开发环境；可用 `Auth__AdminUsername`、`Auth__AdminPassword` 覆盖）。
 
-- `GET /api/integrations/alibaba/apis`: show configured API registry and comments.
-- `GET /api/integrations/alibaba/logs`: latest Alibaba API call logs.
-- `POST /api/integrations/alibaba/call`: generic signed API call by `apiKey` and JSON payload.
-- `POST /api/integrations/alibaba/catalog/categories/tree`
-- `POST /api/integrations/alibaba/catalog/categories/attributes`
-- `POST /api/integrations/alibaba/images/upload`
-- `POST /api/integrations/alibaba/products/create`
-- `POST /api/integrations/alibaba/products/update`
-- `POST /api/integrations/alibaba/products/get`
-- `POST /api/integrations/alibaba/products/offline`
-- `POST /api/integrations/alibaba/products/delete`
-- `POST /api/integrations/alibaba/orders/search`
-- `POST /api/integrations/alibaba/orders/detail`
-- `POST /api/integrations/alibaba/logistics/freight-templates`
-- `POST /api/integrations/alibaba/logistics/shipments/create`
+3. 进入「店铺连接」，自检通过后授权 Alibaba 店铺（本地使用「粘贴回调链接」方式）。
 
-Unconfigured API methods return a clear 400 error and never simulate success.
+## Alibaba 开放平台
 
-## Publish Audit
+- 协议：IOP，网关 `https://openapi-api.alibaba.com/rest`，HMAC-SHA256 签名（API 路径 + 排序参数），毫秒时间戳，`access_token` 参数。
+- 所有接口路径已内置官方默认值（见 `Alibaba/AlibabaSettings.cs`），需要时可用 `Alibaba__Apis__{key}__Path` 覆盖。
+- 授权回调：`/openapi/callback`，必须与 App Console 登记的地址一致（生产为 `https://erp.soford.cn/openapi/callback`）。
+- Token 用 ASP.NET Data Protection 加密保存，过期前 5 分钟自动续期。
+- 如果接口返回无权限，需在 App Console 为应用申请对应 API 权限包；错误码会原样显示在结果和 API 日志中。
 
-- `GET /api/catalog/publish-jobs`: latest publish/preflight/fallback jobs.
-- Alibaba API call logs are stored in `SofordRepApi/App_Data/alibaba-api-logs.json`.
-- Publish jobs are stored in `SofordRepApi/App_Data/publish-jobs.json`.
-- Product and token data stay under `App_Data`; this folder is intentionally ignored by git.
-
-## Docker
+## 测试
 
 ```powershell
-copy .env.example .env
-# Fill .env with real Alibaba values.
-docker compose up --build
+dotnet test SofordRepApi.Tests
+cd WebSofordRep; npm run lint; npm run build
 ```
 
-The web container serves the React app and proxies `/api` to the API container.
+## 部署
 
-## Import Columns
+- Docker：`copy .env.example .env`，填写后 `docker compose up --build`（生产环境必须设置 `Auth__AdminUsername/Password`，否则 API 拒绝启动）。
+- Ubuntu 无 Docker：`powershell -ExecutionPolicy Bypass -File .\publish-server.ps1` 生成 `soford-erp-server.zip`，按 [deploy/DEPLOY_UBUNTU.md](deploy/DEPLOY_UBUNTU.md) 部署。
 
-Supported `.xlsx` and `.csv` headers:
+## 导入列
 
-`Sku, Title, CategoryId, Currency, Price, MOQ, Stock, LeadTimeDays, MainImageUrl, DetailImageUrls, Keywords, Attributes, Description`
+模板可在系统中下载（`.xlsx`，含填写说明）。支持的表头（中英文均可）：
 
-`DetailImageUrls` and `Keywords` accept semicolon-separated values. `Attributes` accepts JSON or `key:value;key:value`.
+`Sku(商品编码)`、`Title(标题)`、`Description(描述)`、`Keywords(关键词)`、`BrandName(品牌)`、`ModelNumber(型号)`、`CategoryId(类目ID)`、`Attributes(属性，名称:值;…)`、`Currency(币种)`、`Price(价格)`、`TieredPrices(阶梯价，数量:价格;…)`、`MOQ(起订量)`、`Unit(单位)`、`Stock(库存)`、`LeadTimeDays(交期)`、`ShippingTemplateId(运费模板)`、`WeightKg(重量)`、`LengthCm/WidthCm/HeightCm(长宽高)`、`Images(图片，;分隔)`，兼容旧模板的 `MainImageUrl`、`DetailImageUrls`。
