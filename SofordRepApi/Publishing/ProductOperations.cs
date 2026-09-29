@@ -51,8 +51,13 @@ public sealed class ProductOperations(
     AlibabaClient alibaba,
     ProductLocks locks,
     TimeProvider time,
+    AlibabaTokenService tokens,
     ILogger<ProductOperations> logger)
 {
+    /// <summary>The account whose authorization acts for this product (assigned, owner, or default).</summary>
+    private async Task<Guid?> AccountForAsync(ProductRecord product) =>
+        AlibabaTokenService.ResolveForProduct(await tokens.GetAccountsAsync(), product)?.Id;
+
     public async Task<OperationItemResult> PublishAsync(Guid productId)
     {
         using var _ = await locks.AcquireAsync(productId);
@@ -131,6 +136,8 @@ public sealed class ProductOperations(
         var isUpdate = !string.IsNullOrWhiteSpace(product.RemoteProductId);
         var action = isUpdate ? "update" : "create";
         var sentContent = product.ContentUpdatedAt;
+        // New listings are owned by the account that creates them, so the chosen account matters here.
+        var accountId = await AccountForAsync(product);
         var attemptAt = time.GetUtcNow();
         if (!isUpdate)
         {
@@ -138,8 +145,8 @@ public sealed class ProductOperations(
         }
 
         var result = isUpdate
-            ? await alibaba.CallAsync("product.update", ListingMapper.BuildUpdatePayload(product))
-            : await alibaba.CallAsync("product.create", ListingMapper.BuildCreatePayload(product));
+            ? await alibaba.CallAsync("product.update", ListingMapper.BuildUpdatePayload(product), accountId: accountId)
+            : await alibaba.CallAsync("product.create", ListingMapper.BuildCreatePayload(product), accountId: accountId);
 
         string? remoteId = isUpdate ? product.RemoteProductId : null;
         if (!isUpdate && result.Success) remoteId = ExtractProductId(result.Json);
@@ -205,13 +212,14 @@ public sealed class ProductOperations(
     {
         var modelNumber = ListingMapper.RemoteModelNumber(product);
         if (string.IsNullOrWhiteSpace(modelNumber)) return null;
+        var accountId = await AccountForAsync(product);
 
         // Real stores reuse model numbers across dozens of listings and search results are not ordered by
         // creation time, so walk the pages (bounded) instead of trusting page 1.
         var items = new List<JsonElement>();
         for (var page = 1; page <= MaxLookupPages; page++)
         {
-            var result = await alibaba.CallAsync("product.search", new { page_index = page, page_size = AlibabaCatalogSync.PageSize, model_number = modelNumber });
+            var result = await alibaba.CallAsync("product.search", new { page_index = page, page_size = AlibabaCatalogSync.PageSize, model_number = modelNumber }, accountId: accountId);
             if (!result.Success || result.Json is null) return null;
             if (AlibabaResponseParser.Find(result.Json.Value, "product_info") is not { ValueKind: JsonValueKind.Array } pageItems || pageItems.GetArrayLength() == 0) break;
             items.AddRange(pageItems.EnumerateArray().Select(x => x.Clone()));
@@ -250,7 +258,7 @@ public sealed class ProductOperations(
         var (product, error) = await LoadPublishedAsync(productId);
         if (product is null) return error!;
 
-        var result = await alibaba.CallAsync("product.status", ListingMapper.BuildStatusPayload(product));
+        var result = await alibaba.CallAsync("product.status", ListingMapper.BuildStatusPayload(product), accountId: await AccountForAsync(product));
         if (!result.Success)
         {
             return new(productId, product.Sku, false, AlibabaErrors.Explain(result), product.RemoteProductId, "status");
@@ -275,7 +283,13 @@ public sealed class ProductOperations(
         var (product, error) = await LoadPublishedAsync(productId);
         if (product is null) return error!;
 
-        var result = await alibaba.CallAsync("product.inventory.update", ListingMapper.BuildInventoryPayload(product));
+        if (product.Stock <= 0)
+        {
+            // Most B2B listings do not track stock; pushing 0 would mark a live listing as out of stock.
+            return new(productId, product.Sku, false, "本地库存为 0，为避免把 Alibaba 上的库存清零，已跳过。请先在商品中填写实际库存。", product.RemoteProductId, "inventory");
+        }
+
+        var result = await alibaba.CallAsync("product.inventory.update", ListingMapper.BuildInventoryPayload(product), accountId: await AccountForAsync(product));
         return await RecordSyncAsync(product, result, "inventory", $"库存已同步为 {product.Stock}");
     }
 
@@ -291,7 +305,7 @@ public sealed class ProductOperations(
         }
 
         var tiers = string.Join("，", ListingMapper.EffectiveTiers(product).Select(x => $"≥{x.Quantity}: ${x.Price}"));
-        var result = await alibaba.CallAsync("product.price.update", ListingMapper.BuildPricePayload(product));
+        var result = await alibaba.CallAsync("product.price.update", ListingMapper.BuildPricePayload(product), accountId: await AccountForAsync(product));
         return await RecordSyncAsync(product, result, "price", $"价格已同步（{tiers}）");
     }
 
@@ -310,7 +324,20 @@ public sealed class ProductOperations(
         if (eligible.Count == 0) return items;
 
         var action = online ? "online" : "offline";
-        var result = await alibaba.CallAsync("product.status.update", ListingMapper.BuildOnlineOfflinePayload(eligible, online));
+        // Sub-accounts may only change their own listings, so each account sends its own batch.
+        var accounts = await tokens.GetAccountsAsync();
+        foreach (var group in eligible.GroupBy(x => AlibabaTokenService.ResolveForProduct(accounts, x)?.Id))
+        {
+            items.AddRange(await SetOnlineForAccountAsync(group.ToList(), online, action, group.Key));
+        }
+
+        return items;
+    }
+
+    private async Task<List<OperationItemResult>> SetOnlineForAccountAsync(List<ProductRecord> eligible, bool online, string action, Guid? accountId)
+    {
+        var items = new List<OperationItemResult>();
+        var result = await alibaba.CallAsync("product.status.update", ListingMapper.BuildOnlineOfflinePayload(eligible, online), accountId: accountId);
         var updatedIds = ReadIdList(result.Json, "updated_product_ids");
         var errorById = ReadStatusErrors(result.Json);
         foreach (var product in eligible)

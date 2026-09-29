@@ -4,7 +4,7 @@ import {
   Plus, RefreshCw, Rocket, Search, Tags, Trash2, Upload, Warehouse, DollarSign,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { api, errorText, post, type BatchResult, type ImportResult, type Product, type ProductDraft, type PublishJob, type PublishState, type PullResult } from '../api'
+import { accountOf, api, errorText, post, type AlibabaAccount, type BatchResult, type ImportResult, type Product, type ProductDraft, type PublishJob, type PublishState, type PullResult } from '../api'
 import { BatchResultDialog, Modal, Pagination, Pill, Spinner } from '../components/ui'
 import { useApp } from '../context'
 import { useInitialLoad } from '../hooks'
@@ -28,6 +28,8 @@ export function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
+  const [accounts, setAccounts] = useState<AlibabaAccount[]>([])
+  const [accountFilter, setAccountFilter] = useState('all')
   const [filter, setFilter] = useState<Filter>('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
@@ -44,7 +46,12 @@ export function ProductsPage() {
 
   const load = useCallback(async () => {
     try {
-      setProducts(await api<Product[]>('/api/catalog/products'))
+      const [items, accountList] = await Promise.all([
+        api<Product[]>('/api/catalog/products'),
+        api<AlibabaAccount[]>('/api/integrations/alibaba/accounts').catch(() => [] as AlibabaAccount[]),
+      ])
+      setProducts(items)
+      setAccounts(accountList)
     } catch (err) {
       notify('error', errorText(err, '加载商品失败'))
     } finally {
@@ -77,10 +84,14 @@ export function ProductsPage() {
       if (filter === 'incomplete' && item.localState !== 'Incomplete') return false
       if (filter === 'ready' && !(item.localState === 'Ready' && item.publishState === 'NotPublished')) return false
       if (!['all', 'incomplete', 'ready'].includes(filter) && item.publishState !== filter) return false
+      if (accountFilter !== 'all') {
+        const owner = accounts.find((a) => !!item.ownerAliId && a.ownerAliIds.includes(item.ownerAliId))
+        if (accountFilter === 'none' ? owner || item.accountId : owner?.id !== accountFilter && item.accountId !== accountFilter) return false
+      }
       if (!key) return true
       return [item.sku, item.title, item.categoryId, item.remoteProductId ?? '', item.brandName].some((value) => value.toLowerCase().includes(key))
     })
-  }, [products, query, filter])
+  }, [products, query, filter, accountFilter, accounts])
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize))
   const currentPage = Math.min(page, pages)
@@ -147,6 +158,9 @@ export function ProductsPage() {
   const publish = () => {
     const blocked = selectedProducts.filter((x) => x.localState === 'Incomplete')
     const updates = selectedProducts.filter((x) => x.remoteProductId).length
+    const authorized = accounts.filter((x) => x.authorized)
+    // Uncontrolled picker: the dialog content is rendered once, the choice is read on confirm.
+    const choice = { accountId: '' }
     confirm({
       title: '发布到 Alibaba',
       confirmText: '开始发布',
@@ -160,12 +174,22 @@ export function ProductsPage() {
               只改库存或价格请用「同步库存」「同步价格」。
             </p>
           )}
+          {authorized.length > 1 && (
+            <label className="field">
+              用哪个账号操作
+              <select defaultValue="" onChange={(e) => (choice.accountId = e.target.value)}>
+                <option value="">自动：商品所属账号，没有授权时用默认账号</option>
+                {authorized.map((a) => <option key={a.id} value={a.id}>{a.name}{a.isDefault ? '（默认）' : ''}</option>)}
+              </select>
+              <span className="muted">新发布的商品会归属到操作它的账号。子账号通常只能更新自己负责的商品。</span>
+            </label>
+          )}
           <p className="muted">发布在后台执行，可以离开本页面，进度可在「发布任务」查看。</p>
         </>
       ),
       onConfirm: () =>
         void run('publish', async () => {
-          const created = await post<PublishJob>('/api/catalog/publish', { productIds: selectedIds })
+          const created = await post<PublishJob>('/api/catalog/publish', { productIds: selectedIds, accountId: choice.accountId || null })
           setJob(created)
           await load()
         }),
@@ -276,6 +300,13 @@ export function ProductsPage() {
           {filters.map((item) => (
             <button key={item.key} type="button" className={clsx(filter === item.key && 'active')} onClick={() => { setFilter(item.key); setPage(1) }}>{item.label}</button>
           ))}
+          {accounts.length > 0 && (
+            <select className="account-filter" value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setPage(1) }} aria-label="按账号筛选">
+              <option value="all">全部账号</option>
+              {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}（{a.productCount + a.assignedCount}）</option>)}
+              <option value="none">未归属账号</option>
+            </select>
+          )}
         </div>
         <div className="actions">
           <button type="button" onClick={() => setEditing('new')}><Plus size={16} /> 新建</button>
@@ -323,6 +354,22 @@ export function ProductsPage() {
         <button type="button" onClick={() => void exportCsv()} disabled={busy === 'export'} title={none ? '导出全部商品' : '导出选中商品'}>
           <FileSpreadsheet size={16} /> 导出 CSV
         </button>
+        {accounts.some((a) => a.authorized) && (
+          <select value="" disabled={none || busy !== null} aria-label="指定操作账号" title="指定用哪个账号发布、更新、同步选中的商品" onChange={(e) => {
+            const value = e.target.value
+            if (!value) return
+            void run('assign', async () => {
+              const accountId = value === 'auto' ? null : value
+              await post('/api/catalog/assign-account', { productIds: selectedIds, accountId })
+              notify('success', accountId ? `已指定 ${selectedIds.length} 个商品由「${accounts.find((a) => a.id === accountId)?.name}」操作。` : `已恢复 ${selectedIds.length} 个商品为自动选择账号。`)
+              await load()
+            })
+          }}>
+            <option value="">指定账号…</option>
+            <option value="auto">自动（所属账号 / 默认账号）</option>
+            {accounts.filter((a) => a.authorized).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        )}
         <button type="button" className="danger-text" onClick={() => remove(selectedIds)} disabled={none || busy !== null}><Trash2 size={16} /> 删除</button>
       </section>
 
@@ -357,6 +404,7 @@ export function ProductsPage() {
                 })} />
               </th>
               <th>商品</th>
+              <th className="col-account">账号</th>
               <th className="col-cat">类目</th>
               <th className="col-num">价格 / 起订</th>
               <th className="col-num">库存</th>
@@ -387,6 +435,9 @@ export function ProductsPage() {
                         <span>{item.sku}{item.remoteProductId ? ` · Alibaba ${item.remoteProductId}` : ''}</span>
                       </div>
                     </div>
+                  </td>
+                  <td className="col-account">
+                    <AccountCell product={item} accounts={accounts} />
                   </td>
                   <td className="col-cat">
                     {item.categoryId ? <><div>{item.categoryId}</div><small className="muted clip" title={item.categoryPath || item.categoryName}>{item.categoryPath || item.categoryName}</small></> : <span className="muted">-</span>}
@@ -491,5 +542,18 @@ function Metric({ label, value, tone, onClick }: { label: string; value: number;
       <span>{label}</span>
       <strong>{value}</strong>
     </button>
+  )
+}
+
+/** Owner account of the listing, plus the operating account when one was assigned explicitly. */
+function AccountCell({ product, accounts }: { product: Product; accounts: AlibabaAccount[] }) {
+  const owner = accounts.find((a) => !!product.ownerAliId && a.ownerAliIds.includes(product.ownerAliId))
+  const operator = accountOf(product, accounts)
+  if (!owner && !operator) return <span className="muted">-</span>
+  return (
+    <>
+      <div className="clip" title={owner?.name}>{owner?.name ?? '（新建）'}</div>
+      {operator && operator.id !== owner?.id && <small className="muted clip" title={`由「${operator.name}」操作`}>由 {operator.name} 操作</small>}
+    </>
   )
 }

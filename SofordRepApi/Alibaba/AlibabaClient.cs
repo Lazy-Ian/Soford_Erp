@@ -6,7 +6,8 @@ using Microsoft.AspNetCore.DataProtection;
 /// <summary>Business-level Alibaba caller: resolves the API from the registry and attaches a valid seller token.</summary>
 public sealed class AlibabaClient(AlibabaTransport transport, AlibabaTokenService tokens, IConfiguration config)
 {
-    public async Task<AlibabaApiResult> CallAsync(string apiKey, object? payload, AlibabaFile? file = null, CancellationToken cancellationToken = default)
+    /// <param name="accountId">Account whose authorization to use; null uses the default account.</param>
+    public async Task<AlibabaApiResult> CallAsync(string apiKey, object? payload, AlibabaFile? file = null, CancellationToken cancellationToken = default, Guid? accountId = null)
     {
         var settings = AlibabaSettings.FromConfiguration(config);
         if (!settings.Apis.TryGetValue(apiKey, out var api))
@@ -37,13 +38,13 @@ public sealed class AlibabaClient(AlibabaTransport transport, AlibabaTokenServic
         string? accessToken = null;
         if (api.RequiresToken)
         {
-            var (token, error) = await tokens.GetValidAccessTokenAsync();
+            var (token, error) = await tokens.GetValidAccessTokenAsync(accountId);
             if (token is null)
             {
                 return AlibabaApiResult.Failure(apiKey, api.Path, "NotAuthorized", error ?? "未授权。");
             }
 
-            accessToken = token;
+            accessToken = token.AccessToken;
         }
 
         return await transport.SendAsync(settings, api.Key, api.Path, parameters, accessToken, file, cancellationToken);

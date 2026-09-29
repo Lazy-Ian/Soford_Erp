@@ -136,6 +136,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
                 }
 
                 existing.RemoteProductId = incoming.RemoteProductId;
+                existing.OwnerAliId = incoming.OwnerAliId ?? existing.OwnerAliId;
                 existing.RemoteStatus = incoming.RemoteStatus;
                 existing.PublishState = incoming.PublishState;
                 existing.RemoteStatusMessage = incoming.RemoteStatusMessage;

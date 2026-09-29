@@ -107,17 +107,23 @@ public sealed class RemoteSyncWorker(
 
         var now = time.GetUtcNow();
         var notes = new List<string>();
-        if (token.AccessTokenExpiresAt - now < TokenRenewWindow && token.RefreshTokenExpiresAt > now)
+        foreach (var account in (await tokens.GetAccountsAsync()).Where(x => x.Token is not null))
         {
+            var accountToken = account.Token!;
+            if (accountToken.AccessTokenExpiresAt - now >= TokenRenewWindow || accountToken.RefreshTokenExpiresAt <= now)
+            {
+                continue;
+            }
+
             try
             {
-                await tokens.RefreshAsync();
-                notes.Add("已提前续期 Token");
+                await tokens.RefreshAsync(account.Id);
+                notes.Add($"已提前续期「{account.Name}」的 Token");
             }
             catch (Exception ex) when (ex is AlibabaApiException or InvalidOperationException)
             {
-                logger.LogWarning(ex, "Proactive Alibaba token refresh failed");
-                notes.Add($"Token 续期失败：{ex.Message}");
+                logger.LogWarning(ex, "Proactive Alibaba token refresh failed for {Account}", account.Name);
+                notes.Add($"「{account.Name}」Token 续期失败：{ex.Message}");
             }
         }
 

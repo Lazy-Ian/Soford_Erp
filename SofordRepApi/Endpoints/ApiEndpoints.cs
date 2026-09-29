@@ -11,7 +11,16 @@ public sealed record IdsRequest(Guid[]? ProductIds)
     public Guid[] Ids => ProductIds?.Distinct().ToArray() ?? [];
 }
 public sealed record AlibabaCodeRequest(string Code);
-public sealed record AlibabaCallRequest(string ApiKey, JsonElement? Payload);
+public sealed record AlibabaCallRequest(string ApiKey, JsonElement? Payload, Guid? AccountId = null);
+public sealed record AccountUpdateRequest(string? Name, bool? IsDefault, string[]? OwnerAliIds);
+public sealed record PublishRequest(Guid[]? ProductIds, Guid? AccountId)
+{
+    public Guid[] Ids => ProductIds?.Distinct().ToArray() ?? [];
+}
+public sealed record AssignAccountRequest(Guid[]? ProductIds, Guid? AccountId)
+{
+    public Guid[] Ids => ProductIds?.Distinct().ToArray() ?? [];
+}
 
 public static class ApiEndpoints
 {
@@ -114,8 +123,8 @@ public static class ApiEndpoints
 
             try
             {
-                var token = await tokens.CreateFromCodeAsync(code);
-                return Results.Ok(new { HasToken = true, token.AccessTokenExpiresAt, token.RefreshTokenExpiresAt, token.Account });
+                var (account, token) = await tokens.CreateFromCodeAsync(code);
+                return Results.Ok(new { HasToken = true, token.AccessTokenExpiresAt, token.RefreshTokenExpiresAt, token.Account, AccountId = account.Id, AccountName = account.Name });
             }
             catch (AlibabaApiException ex)
             {
@@ -127,11 +136,11 @@ public static class ApiEndpoints
             }
         });
 
-        alibaba.MapPost("/token/refresh", async (AlibabaTokenService tokens) =>
+        alibaba.MapPost("/token/refresh", async (Guid? accountId, AlibabaTokenService tokens) =>
         {
             try
             {
-                var token = await tokens.RefreshAsync();
+                var token = await tokens.RefreshAsync(accountId);
                 return Results.Ok(new { HasToken = true, token.AccessTokenExpiresAt, token.RefreshTokenExpiresAt, token.Account });
             }
             catch (AlibabaApiException ex)
@@ -144,11 +153,38 @@ public static class ApiEndpoints
             }
         });
 
-        alibaba.MapDelete("/token", async (AlibabaTokenStore store) =>
+        alibaba.MapDelete("/token", async (Guid? accountId, AlibabaTokenService tokens) =>
         {
-            await store.ClearAsync();
+            var target = accountId ?? AlibabaTokenService.DefaultAccount(await tokens.GetAccountsAsync())?.Id;
+            if (target is not null) await tokens.ClearTokenAsync(target.Value);
             return Results.NoContent();
         });
+
+        alibaba.MapGet("/accounts", async (AlibabaTokenService tokens, ProductRepository products) =>
+        {
+            var accounts = await tokens.GetAccountsAsync();
+            var all = await products.GetAllAsync();
+            var now = DateTimeOffset.UtcNow;
+            return Results.Ok(accounts.OrderByDescending(x => x.IsDefault).ThenByDescending(x => x.Token is not null).ThenBy(x => x.Name).Select(account => new
+            {
+                account.Id,
+                account.Name,
+                account.OwnerAliIds,
+                account.IsDefault,
+                Authorized = account.Token is not null && (account.Token.AccessTokenExpiresAt > now || account.Token.RefreshTokenExpiresAt > now),
+                HasToken = account.Token is not null,
+                Login = account.Token?.Account,
+                account.Token?.AccessTokenExpiresAt,
+                account.Token?.RefreshTokenExpiresAt,
+                ProductCount = all.Count(p => account.Owns(p.OwnerAliId)),
+                AssignedCount = all.Count(p => p.AccountId == account.Id)
+            }));
+        });
+
+        alibaba.MapPut("/accounts/{id:guid}", async (Guid id, AccountUpdateRequest request, AlibabaTokenService tokens) =>
+            await tokens.UpdateAccountAsync(id, request.Name, request.IsDefault, request.OwnerAliIds) is { } account
+                ? Results.Ok(new { account.Id, account.Name, account.IsDefault, account.OwnerAliIds })
+                : Results.NotFound());
 
         alibaba.MapGet("/apis", (IConfiguration config) =>
             Results.Ok(AlibabaSettings.FromConfiguration(config).Apis.Values.OrderBy(x => x.Area).ThenBy(x => x.Key)));
@@ -156,7 +192,7 @@ public static class ApiEndpoints
         alibaba.MapGet("/logs", async (AlibabaApiLogStore logs, int take = 100) => Results.Ok(await logs.GetLatestAsync(Math.Clamp(take, 1, 500))));
 
         alibaba.MapPost("/call", async (AlibabaCallRequest request, AlibabaClient client) =>
-            Results.Ok(await client.CallAsync(request.ApiKey, request.Payload is { ValueKind: JsonValueKind.Object } payload ? payload : null)));
+            Results.Ok(await client.CallAsync(request.ApiKey, request.Payload is { ValueKind: JsonValueKind.Object } payload ? payload : null, accountId: request.AccountId)));
 
         alibaba.MapGet("/categories/{categoryId}/attributes", async (string categoryId, bool? refresh, CategoryAttributeService categories, AlibabaClient client) =>
         {
@@ -350,27 +386,50 @@ public static class ApiEndpoints
             });
         });
 
-        catalog.MapPost("/pull-from-alibaba", async (AlibabaCatalogSync sync, CancellationToken cancellationToken) =>
+        catalog.MapPost("/pull-from-alibaba", async (AlibabaCatalogSync sync, AlibabaTokenService tokens, ProductRepository repo, CancellationToken cancellationToken) =>
         {
             var (result, error) = await sync.PullAsync(cancellationToken);
+            if (result is not null)
+            {
+                // Group products by the account that owns them, even for accounts nobody has authorized yet.
+                await tokens.EnsureOwnerAccountsAsync((await repo.GetAllAsync()).Select(x => x.OwnerAliId));
+            }
+
             return result is not null ? Results.Ok(result) : Problem("从 Alibaba 导入失败", AlibabaErrors.Explain(error!));
         });
 
         catalog.MapPost("/predict-category", (IdsRequest request, ProductOperations operations) =>
             RunEachAsync(request.Ids, operations.PredictCategoryAsync));
 
-        catalog.MapPost("/publish", async (IdsRequest request, IConfiguration config, AlibabaTokenService tokens, PublishJobStore jobs, PublishQueue queue, ProductRepository repo, TimeProvider time) =>
+        catalog.MapPost("/assign-account", async (AssignAccountRequest request, AlibabaTokenService tokens, ProductRepository repo) =>
+        {
+            if (request.AccountId is { } accountId && (await tokens.GetAccountsAsync()).All(x => x.Id != accountId))
+            {
+                return Problem("账号不存在");
+            }
+
+            var changed = await repo.UpdateManyAsync(request.Ids, p => p.AccountId = request.AccountId);
+            return Results.Ok(new { Updated = changed.Count });
+        });
+
+        catalog.MapPost("/publish", async (PublishRequest request, IConfiguration config, AlibabaTokenService tokens, PublishJobStore jobs, PublishQueue queue, ProductRepository repo, TimeProvider time) =>
         {
             var ids = request.Ids;
             if (ids.Length == 0) return Problem("请先选择商品");
 
             var settings = AlibabaSettings.FromConfiguration(config);
             if (!settings.HasCredentials) return Problem("Alibaba 未配置", "未配置 AppKey / AppSecret，无法发布。可先导出 CSV。");
-            var (token, error) = await tokens.GetValidAccessTokenAsync();
+            var (token, error) = await tokens.GetValidAccessTokenAsync(request.AccountId);
             if (token is null) return Problem("Alibaba 未授权", error);
 
             var existing = (await repo.GetManyAsync(ids)).Select(x => x.Id).ToArray();
             if (existing.Length == 0) return Problem("选中的商品不存在");
+
+            if (request.AccountId is { } chosen)
+            {
+                // The chosen account publishes new listings (and becomes their owner) and manages the selected ones from now on.
+                await repo.UpdateManyAsync(existing, p => p.AccountId = chosen);
+            }
 
             var job = new PublishJobRecord
             {

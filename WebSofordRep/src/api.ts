@@ -38,6 +38,8 @@ export type Product = ProductDraft & {
   localState: LocalState
   publishState: PublishState
   remoteProductId?: string | null
+  ownerAliId?: string | null
+  accountId?: string | null
   remoteStatus?: string | null
   remoteStatusMessage?: string | null
   lastPublishedAt?: string | null
@@ -87,6 +89,25 @@ export type AutomationStatus = {
   checked: number
   changed: number
   lastMessage?: string | null
+}
+
+export type AlibabaAccount = {
+  id: string
+  name: string
+  ownerAliIds: string[]
+  isDefault: boolean
+  authorized: boolean
+  hasToken: boolean
+  login?: string | null
+  accessTokenExpiresAt?: string | null
+  refreshTokenExpiresAt?: string | null
+  productCount: number
+  assignedCount: number
+}
+
+/** The account that acts for a product: explicitly assigned, else the owner account. */
+export function accountOf(product: Pick<Product, 'accountId' | 'ownerAliId'>, accounts: AlibabaAccount[]) {
+  return accounts.find((x) => x.id === product.accountId) ?? accounts.find((x) => !!product.ownerAliId && x.ownerAliIds.includes(product.ownerAliId))
 }
 
 export type PullResult = { total: number; created: number; linked: number; refreshed: number; pages: number; warnings: string[] }

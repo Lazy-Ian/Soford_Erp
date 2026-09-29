@@ -6,12 +6,14 @@ import { Pill, Spinner } from '../components/ui'
 import { useApp } from '../context'
 import { useInitialLoad } from '../hooks'
 import { formatDate } from '../format'
+import { AccountsCard } from './AccountsCard'
 
 export function ConnectionPage() {
   const { notify, confirm, alibaba, refreshAlibaba } = useApp()
   const [checks, setChecks] = useState<DiagnosticCheck[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [code, setCode] = useState('')
+  const [accountsKey, setAccountsKey] = useState(0)
 
   const runDiagnostics = useCallback(async () => {
     setBusy('diagnostics')
@@ -45,8 +47,9 @@ export function ConnectionPage() {
 
   const exchangeCode = () =>
     run('code', async () => {
-      const result = await post<{ accessTokenExpiresAt: string; account?: string }>('/api/integrations/alibaba/token/create', { code })
-      notify('success', `授权成功${result.account ? `（${result.account}）` : ''}，有效至 ${formatDate(result.accessTokenExpiresAt)}。`)
+      const result = await post<{ accessTokenExpiresAt: string; account?: string; accountName?: string }>('/api/integrations/alibaba/token/create', { code })
+      notify('success', `授权成功：${result.accountName || result.account || '账号'}，有效至 ${formatDate(result.accessTokenExpiresAt)}。`)
+      setAccountsKey((key) => key + 1)
       setCode('')
       await refreshAlibaba()
       await runDiagnostics()
@@ -151,6 +154,8 @@ export function ConnectionPage() {
           <button type="button" className="danger-text" onClick={disconnect} disabled={!alibaba?.hasToken}><Unplug size={16} /> 断开授权</button>
         </div>
       </section>
+
+      <AccountsCard reloadKey={accountsKey} />
 
       <AutomationCard />
 

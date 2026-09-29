@@ -72,7 +72,7 @@ builder.Services.AddHttpClient("diagnostics");
 builder.Services.AddHttpClient(AlibabaTransport.HttpClientName, client => client.Timeout = TimeSpan.FromMinutes(5));
 builder.Services.AddSingleton<AlibabaTransport>();
 builder.Services.AddSingleton<AlibabaApiLogStore>();
-builder.Services.AddSingleton<AlibabaTokenStore>();
+builder.Services.AddSingleton<AlibabaAccountStore>();
 builder.Services.AddSingleton<AlibabaTokenService>();
 builder.Services.AddSingleton<AlibabaClient>();
 builder.Services.AddSingleton<CategoryAttributeService>();

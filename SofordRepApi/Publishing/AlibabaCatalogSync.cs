@@ -101,6 +101,7 @@ public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository 
             ShippingTemplateId = AlibabaResponseParser.Text(logistics, "shipping_template_id") ?? "",
             WeightKg = Decimal(AlibabaResponseParser.Text(logistics, "weight")),
             RemoteProductId = remoteId,
+            OwnerAliId = AlibabaResponseParser.Text(basic, "owner_ali_id"),
             RemoteStatus = AlibabaResponseParser.Text(basic, "status")?.ToLowerInvariant(),
             LastSyncedAt = now
         };

@@ -93,13 +93,15 @@ public sealed class SystemDiagnostics(
     {
         const string title = "店铺授权";
         var token = await tokens.GetAsync();
+        var authorizedCount = (await tokens.GetAccountsAsync()).Count(x => x.Token is not null);
         if (token is null)
         {
             return new("token", title, Fail, "尚未授权。", "点击「授权 Alibaba 店铺」，或粘贴回调链接中的 code。");
         }
 
         var now = time.GetUtcNow();
-        var account = string.IsNullOrWhiteSpace(token.Account) ? "" : $"账号 {token.Account}，";
+        var account = (string.IsNullOrWhiteSpace(token.Account) ? "" : $"默认账号 {token.Account}，")
+            + (authorizedCount > 1 ? $"共 {authorizedCount} 个账号已授权，" : "");
         if (token.AccessTokenExpiresAt > now)
         {
             return new("token", title, Ok, $"{account}access_token 有效至 {token.AccessTokenExpiresAt.ToLocalTime():yyyy-MM-dd HH:mm}。");

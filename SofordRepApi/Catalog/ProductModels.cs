@@ -67,6 +67,12 @@ public sealed class ProductRecord
     [JsonConverter(typeof(PublishStateConverter))]
     public PublishState PublishState { get; set; }
     public string? RemoteProductId { get; set; }
+
+    /// <summary>Alibaba account (main or sub-account) responsible for the listing, from owner_ali_id.</summary>
+    public string? OwnerAliId { get; set; }
+
+    /// <summary>Account explicitly chosen to publish/manage this product; null means the owner's or the default account.</summary>
+    public Guid? AccountId { get; set; }
     public string? RemoteStatus { get; set; }
     public string? RemoteStatusMessage { get; set; }
     public DateTimeOffset? LastPublishedAt { get; set; }

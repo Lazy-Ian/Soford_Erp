@@ -161,7 +161,7 @@ p { margin: 0; }
 .progress.small { width: 120px; margin-left: auto; }
 
 .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
-table { width: 100%; min-width: 1100px; border-collapse: collapse; table-layout: fixed; }
+table { width: 100%; min-width: 1250px; border-collapse: collapse; table-layout: fixed; }
 th, td { padding: 10px 10px; border-bottom: 1px solid #edf1f6; text-align: left; vertical-align: middle; font-size: 13px; }
 th { color: var(--muted); background: #fafbfe; font-weight: 600; font-size: 12px; }
 tbody tr:hover { background: #fcfdff; }
@@ -169,6 +169,7 @@ tbody tr.selected { background: #fffaf6; }
 td small { display: block; font-size: 12px; margin-top: 2px; }
 .check { width: 40px; }
 .col-cat { width: 170px; }
+.col-account { width: 150px; }
 .col-num { width: 130px; }
 .col-state { width: 150px; }
 .col-actions { width: 76px; }
@@ -322,3 +323,15 @@ pre.code.tall { max-height: 560px; }
   .result-row { grid-template-columns: 18px 1fr; }
   .result-row span { grid-column: 2; }
 }
+
+/* Accounts */
+.account-filter { width: auto; height: 30px; }
+.batchbar select { width: auto; max-width: 220px; height: 34px; }
+.account-list { display: grid; gap: 8px; }
+.account { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 7px; }
+.account-main { display: grid; gap: 3px; min-width: 0; }
+.account-main .muted { font-size: 12px; word-break: break-all; }
+.account-title { display: flex; align-items: center; gap: 8px; }
+.account .actions select { width: auto; height: 32px; }
+.small-note { font-size: 12px; line-height: 1.6; }
+@media (max-width: 760px) { .account { flex-direction: column; align-items: stretch; } }
