@@ -154,6 +154,12 @@ export function ProductsPage() {
         <>
           <p>将提交 {selectedIds.length} 个商品：新发布 {selectedIds.length - updates} 个，更新已发布商品 {updates} 个。</p>
           {blocked.length > 0 && <p className="warn">其中 {blocked.length} 个存在阻断问题，会被跳过并在结果中列出原因。</p>}
+          {updates > 0 && (
+            <p className="warn">
+              更新会用本系统中的标题、描述、图片、属性、价格覆盖 Alibaba 上的内容。对从 Alibaba 导入的商品，只在确实需要修改内容时再发布；
+              只改库存或价格请用「同步库存」「同步价格」。
+            </p>
+          )}
           <p className="muted">发布在后台执行，可以离开本页面，进度可在「发布任务」查看。</p>
         </>
       ),
