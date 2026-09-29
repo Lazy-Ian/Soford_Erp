@@ -108,7 +108,8 @@ export function ProductEditor({ product, saving, onClose, onSave }: {
     setError(null)
     try {
       const result = await api<{ url: string }>('/api/integrations/alibaba/images/upload', { method: 'POST', body: data })
-      set('images', [...form.images, result.url])
+      // Functional update: keeps any image edits made while the upload was running.
+      setForm((current) => ({ ...current, images: [...current.images, result.url].slice(0, MAX_IMAGES) }))
       notify('success', '图片已上传到 Alibaba 图片银行。')
     } catch (err) {
       setError(errorText(err, '图片上传失败'))

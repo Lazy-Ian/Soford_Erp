@@ -2,6 +2,8 @@ param(
     [string]$Server = "39.106.188.160",
     [string]$User = "root",
     [string]$Domain = "erp.soford.cn",
+    # Optional: with an email the installer requests a Let's Encrypt certificate automatically.
+    [string]$Email = "",
     [switch]$SkipBuild
 )
 
@@ -45,7 +47,7 @@ Write-Host "Running server installer. You may be asked for the server password a
 Write-Host "This adds a separate Nginx site for $Domain and does not overwrite existing www.stepnex.cn config."
 Write-Host ""
 
-Invoke-Native "ssh" @("-t", $Target, "bash ~/install-soford-erp.sh '$Domain'")
+Invoke-Native "ssh" @("-t", $Target, "bash ~/install-soford-erp.sh '$Domain' '$Email'")
 
 Write-Host ""
 Write-Host "Upload/deploy step finished."
@@ -54,5 +56,7 @@ Write-Host "  ssh $Target"
 Write-Host "  sudo nano /opt/soford-erp/env/soford-api.env"
 Write-Host "  sudo systemctl restart soford-erp-api"
 Write-Host ""
-Write-Host "After DNS is ready, enable HTTPS:"
-Write-Host "  sudo certbot --nginx -d $Domain"
+if (-not $Email) {
+    Write-Host "HTTPS: after DNS points $Domain to the server, re-run with an email to request a certificate:"
+    Write-Host "  .\deploy-upload.ps1 -SkipBuild -Email you@example.com"
+}

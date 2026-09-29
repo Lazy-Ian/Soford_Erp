@@ -1,0 +1,6 @@
+[Unit]
+Description=Soford ERP data backup
+
+[Service]
+Type=oneshot
+ExecStart=/opt/soford-erp/bin/soford-erp-backup.sh

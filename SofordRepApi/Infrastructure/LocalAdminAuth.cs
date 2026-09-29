@@ -27,7 +27,22 @@ public static class LocalAdminAuth
         {
             throw new InvalidOperationException("Set Auth__AdminUsername and Auth__AdminPassword before running outside Development.");
         }
+
+        var password = config["Auth:AdminPassword"]!;
+        if (password.Length < 10 || PlaceholderPasswords.Contains(password))
+        {
+            throw new InvalidOperationException("Auth__AdminPassword is a template placeholder or shorter than 10 characters; set a strong password before running outside Development.");
+        }
     }
+
+    private static readonly HashSet<string> PlaceholderPasswords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        DevelopmentPassword,
+        "change-this-password",
+        "change-this-before-running-outside-development",
+        "password",
+        "admin"
+    };
 
     public static bool Verify(IConfiguration config, IHostEnvironment env, string? username, string? password)
     {

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Boxes, Code2, History, LogOut, PlugZap, ScrollText, ShieldCheck } from 'lucide-react'
 import clsx from 'clsx'
 import './App.css'
-import { api, errorText, post, UNAUTHORIZED_EVENT, type AlibabaStatus, type AuthSession } from './api'
+import { api, ApiError, errorText, post, UNAUTHORIZED_EVENT, type AlibabaStatus, type AuthSession } from './api'
 import { ConfirmDialog, Spinner, Toasts, type ConfirmRequest, type Toast } from './components/ui'
 import { AppContext, type AppContextValue, type TabKey } from './context'
 import { ConnectionPage } from './pages/ConnectionPage'
@@ -28,6 +28,7 @@ function App() {
   const [session, setSession] = useState<AuthSession | null>(null)
   const [tab, setTab] = useState<TabKey>(readTab)
   const [alibaba, setAlibaba] = useState<AlibabaStatus | null>(null)
+  const [serverDown, setServerDown] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
   const toastId = useRef(0)
@@ -41,8 +42,11 @@ function App() {
   const refreshAlibaba = useCallback(async () => {
     try {
       setAlibaba(await api<AlibabaStatus>('/api/integrations/alibaba/status'))
-    } catch {
+      setServerDown(false)
+    } catch (err) {
       setAlibaba(null)
+      // 0 = network failure, 5xx = proxy could not reach the API; don't mislabel that as missing Alibaba config.
+      setServerDown(err instanceof ApiError && (err.status === 0 || err.status >= 500))
     }
   }, [])
 
@@ -124,12 +128,20 @@ function App() {
           <button type="button" className={clsx('integration', alibaba?.ready && 'ok')} onClick={() => navigate('connection')}
             title={alibaba?.account ? `已授权账号 ${alibaba.account}` : '查看店铺连接'}>
             {alibaba?.ready ? <ShieldCheck size={16} /> : <AlertTriangle size={16} />}
-            {alibaba?.ready ? '店铺已连接' : alibaba?.hasCredentials ? '店铺未授权' : 'Alibaba 未配置'}
+            {serverDown ? '服务器未连接' : alibaba?.ready ? '店铺已连接' : alibaba?.hasCredentials ? '店铺未授权' : 'Alibaba 未配置'}
           </button>
           <button type="button" onClick={() => void logout()} title={session.username ? `当前用户 ${session.username}` : undefined}>
             <LogOut size={16} /> 退出
           </button>
         </header>
+
+        {alibaba?.warning && (
+          <div className="banner bad top">
+            <AlertTriangle size={16} />
+            <span>{alibaba.warning}</span>
+            <button type="button" onClick={() => navigate('connection')}>去重新授权</button>
+          </div>
+        )}
 
         {tab === 'products' && <ProductsPage />}
         {tab === 'jobs' && <JobsPage />}

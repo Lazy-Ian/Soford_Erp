@@ -42,6 +42,7 @@ export type Product = ProductDraft & {
   remoteStatusMessage?: string | null
   lastPublishedAt?: string | null
   lastSyncedAt?: string | null
+  hasUnpublishedChanges?: boolean
   qualityIssues: QualityIssue[]
   createdAt: string
   updatedAt: string
@@ -75,7 +76,20 @@ export type AlibabaStatus = {
   gatewayUrl: string
   callbackUrl: string
   ready: boolean
+  warning?: string | null
 }
+
+export type AutomationStatus = {
+  enabled: boolean
+  intervalMinutes: number
+  lastRunAt?: string | null
+  nextRunAt?: string | null
+  checked: number
+  changed: number
+  lastMessage?: string | null
+}
+
+export type PullResult = { total: number; created: number; linked: number; refreshed: number; pages: number; warnings: string[] }
 
 export type DiagnosticCheck = { key: string; title: string; status: 'ok' | 'warn' | 'fail'; message: string; fix?: string | null }
 

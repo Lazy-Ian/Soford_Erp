@@ -124,6 +124,9 @@ p { margin: 0; }
   border-radius: var(--radius); font-size: 13px;
 }
 .banner.warn { color: var(--warn); background: var(--warn-bg); border: 1px solid #f0c9a5; }
+.banner.bad { color: var(--bad); background: var(--bad-bg); border: 1px solid #f3c0bd; }
+.banner.top { justify-content: flex-start; margin: 14px 24px 0; }
+.banner.top button { margin-left: auto; }
 
 .toolbar {
   display: grid; grid-template-columns: minmax(220px, 360px) 1fr auto; gap: 12px; align-items: center;

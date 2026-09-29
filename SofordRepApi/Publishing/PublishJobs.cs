@@ -174,7 +174,19 @@ public sealed class PublishWorker(
         foreach (var productId in job.ProductIds.Where(id => !done.Contains(id)))
         {
             stoppingToken.ThrowIfCancellationRequested();
-            job.Add(await operations.PublishAsync(productId));
+            OperationItemResult item;
+            try
+            {
+                item = await operations.PublishAsync(productId);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // One bad product must not abort the rest of the batch.
+                logger.LogError(ex, "Publish of {ProductId} in job {JobId} failed", productId, jobId);
+                item = new(productId, "", false, $"发布出错：{ex.Message}");
+            }
+
+            job.Add(item);
             await jobs.SaveAsync(job);
         }
 

@@ -60,9 +60,9 @@ public static class ListingMapper
             ["product_image"] = new JsonArray(product.Images.Take(ProductQualityService.MaxImages)
                 .Select(url => (JsonNode)new JsonObject { ["image_url"] = url }).ToArray())
         };
-        if (remoteProductId is not null) basic["product_id"] = long.Parse(remoteProductId, CultureInfo.InvariantCulture);
+        if (remoteProductId is not null) basic["product_id"] = ParseRemoteId(remoteProductId, product.Sku);
         if (product.Keywords.Length > 0) basic["keywords"] = string.Join(' ', product.Keywords);
-        if (product.ModelNumber.Length > 0) basic["model_number"] = product.ModelNumber;
+        if (RemoteModelNumber(product) is { Length: > 0 } modelNumber) basic["model_number"] = modelNumber;
         if (product.BrandName.Length > 0) basic["brand_name"] = product.BrandName;
 
         var category = new JsonObject
@@ -116,10 +116,18 @@ public static class ListingMapper
             .Select(x => (JsonNode)new JsonObject { ["quantity"] = x.Quantity, ["price"] = Format(x.Price) }).ToArray())
     };
 
-    private static long RemoteId(ProductRecord product) =>
-        long.TryParse(product.RemoteProductId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id)
+    /// <summary>
+    /// The model number sent to Alibaba. Falls back to the SKU so every listing we create can be found again
+    /// (duplicate protection after a timed-out create, and linking when pulling from Alibaba).
+    /// </summary>
+    public static string RemoteModelNumber(ProductRecord product) => product.ModelNumber.Length > 0 ? product.ModelNumber : product.Sku;
+
+    private static long RemoteId(ProductRecord product) => ParseRemoteId(product.RemoteProductId, product.Sku);
+
+    private static long ParseRemoteId(string? remoteProductId, string sku) =>
+        long.TryParse(remoteProductId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id)
             ? id
-            : throw new InvalidOperationException($"商品 {product.Sku} 尚未发布到 Alibaba（缺少远端商品 ID）。");
+            : throw new InvalidOperationException($"商品 {sku} 的 Alibaba 商品 ID「{remoteProductId}」无效或缺失。");
 
     private static string Format(decimal value) => value.ToString("0.##", CultureInfo.InvariantCulture);
 }

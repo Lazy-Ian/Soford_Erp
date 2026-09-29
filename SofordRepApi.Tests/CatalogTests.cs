@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json.Nodes;
 using ClosedXML.Excel;
 
@@ -186,7 +186,7 @@ public class CatalogTests
         await Assert.ThrowsAsync<SkuConflictException>(() => repo.UpdateAsync(other.Id, p => p.Sku = "SF-001"));
 
         var draft = new ProductDraft("SF-001", "New title", "", [], "", "", "", "", "", "", new(), "USD", 20m, [], 10, "", 1, 1, "", null, null, null, null, [], false);
-        var (createdCount, updatedCount) = await repo.ImportAsync([(draft, _ => { })]);
+        var (createdCount, updatedCount) = await repo.ImportAsync([new ImportRow(2, draft, new HashSet<string> { "Sku", "Title", "Price" })], _ => { });
 
         Assert.Equal((0, 1), (createdCount, updatedCount));
         var reloaded = (await repo.GetAsync(created.Id))!;

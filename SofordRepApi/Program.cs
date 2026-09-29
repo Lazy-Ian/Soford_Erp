@@ -68,7 +68,8 @@ builder.Services.AddSingleton(paths);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddHttpClient("diagnostics");
-builder.Services.AddHttpClient(AlibabaTransport.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30));
+// Per-call timeouts are applied in AlibabaTransport; this is only an outer safety net.
+builder.Services.AddHttpClient(AlibabaTransport.HttpClientName, client => client.Timeout = TimeSpan.FromMinutes(5));
 builder.Services.AddSingleton<AlibabaTransport>();
 builder.Services.AddSingleton<AlibabaApiLogStore>();
 builder.Services.AddSingleton<AlibabaTokenStore>();
@@ -79,11 +80,16 @@ builder.Services.AddSingleton<ProductRepository>();
 builder.Services.AddSingleton<ProductQualityService>();
 builder.Services.AddSingleton<ProductImportService>();
 builder.Services.AddSingleton<ExportService>();
+builder.Services.AddSingleton<ProductLocks>();
 builder.Services.AddSingleton<ProductOperations>();
 builder.Services.AddTransient<SystemDiagnostics>();
 builder.Services.AddSingleton<PublishJobStore>();
 builder.Services.AddSingleton<PublishQueue>();
 builder.Services.AddHostedService<PublishWorker>();
+builder.Services.AddSingleton<AlibabaCatalogSync>();
+builder.Services.AddSingleton<AutomationState>();
+builder.Services.AddSingleton<RemoteSyncWorker>();
+builder.Services.AddHostedService(provider => provider.GetRequiredService<RemoteSyncWorker>());
 
 var app = builder.Build();
 

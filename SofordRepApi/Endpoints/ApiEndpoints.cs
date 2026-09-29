@@ -5,7 +5,11 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 
-public sealed record IdsRequest(Guid[] ProductIds);
+public sealed record IdsRequest(Guid[]? ProductIds)
+{
+    /// <summary>Never null: a missing or null productIds is treated as an empty selection.</summary>
+    public Guid[] Ids => ProductIds?.Distinct().ToArray() ?? [];
+}
 public sealed record AlibabaCodeRequest(string Code);
 public sealed record AlibabaCallRequest(string ApiKey, JsonElement? Payload);
 
@@ -57,6 +61,10 @@ public static class ApiEndpoints
         });
 
         api.MapGet("/system/diagnostics", async (SystemDiagnostics diagnostics, HttpContext http) => Results.Ok(await diagnostics.RunAsync(http)));
+
+        api.MapGet("/system/automation", (AutomationState state) => Results.Ok(state.Current));
+
+        api.MapPost("/system/automation/run", async (RemoteSyncWorker worker) => Results.Ok(await worker.RunOnceAsync()));
     }
 
     public static void MapAlibabaEndpoints(this RouteGroupBuilder api)
@@ -69,6 +77,7 @@ public static class ApiEndpoints
             var token = await tokens.GetAsync();
             return Results.Ok(new
             {
+                Warning = AuthorizationWarning(token, DateTimeOffset.UtcNow),
                 settings.HasCredentials,
                 HasToken = token is not null,
                 token?.AccessTokenExpiresAt,
@@ -186,6 +195,22 @@ public static class ApiEndpoints
         ILoggerFactory loggers) =>
         AlibabaOAuth.CompleteCallbackAsync(code, state, http, tokens, config, dataProtection, loggers.CreateLogger("AlibabaOAuth"));
 
+    /// <summary>Warns before the seller authorization lapses; refresh tokens cannot be renewed, only re-authorized.</summary>
+    public static string? AuthorizationWarning(AlibabaTokenRecord? token, DateTimeOffset now)
+    {
+        if (token is null) return null;
+        var accessValid = token.AccessTokenExpiresAt > now;
+        var refreshValid = token.RefreshTokenExpiresAt > now;
+        if (!accessValid && !refreshValid) return "Alibaba 店铺授权已过期，发布和同步已停止，请重新授权。";
+
+        // The session ends when the later of the two expires, since the access token can be renewed until the refresh token lapses.
+        var sessionEnds = refreshValid && token.RefreshTokenExpiresAt > token.AccessTokenExpiresAt ? token.RefreshTokenExpiresAt : token.AccessTokenExpiresAt;
+        var left = sessionEnds - now;
+        return left < TimeSpan.FromDays(7)
+            ? $"Alibaba 店铺授权将在 {Math.Max(1, (int)Math.Ceiling(left.TotalDays))} 天内到期（{sessionEnds.ToLocalTime():yyyy-MM-dd HH:mm}），请尽快重新授权。"
+            : null;
+    }
+
     /// <summary>Accepts either a bare code or the whole callback URL the seller was redirected to.</summary>
     public static string ExtractCode(string? input)
     {
@@ -249,6 +274,7 @@ public static class ApiEndpoints
                 var updated = await repo.UpdateAsync(id, p =>
                 {
                     p.ApplyDraft(draft);
+                    p.ContentUpdatedAt = DateTimeOffset.UtcNow;
                     p.QualityIssues = preview.QualityIssues;
                     p.LocalState = preview.LocalState;
                 });
@@ -264,7 +290,7 @@ public static class ApiEndpoints
             await repo.DeleteManyAsync([id]) > 0 ? Results.NoContent() : Results.NotFound());
 
         products.MapPost("/batch-delete", async (IdsRequest request, ProductRepository repo) =>
-            Results.Ok(new { Deleted = await repo.DeleteManyAsync(request.ProductIds) }));
+            Results.Ok(new { Deleted = await repo.DeleteManyAsync(request.Ids) }));
 
         products.MapGet("/{id:guid}/listing-preview", async (Guid id, ProductRepository repo) =>
         {
@@ -302,21 +328,20 @@ public static class ApiEndpoints
             {
                 return Problem("导入失败", ex.Message);
             }
-            catch (Exception ex) when (ex is InvalidDataException or IOException or FormatException or ArgumentException)
+            catch (Exception ex) when (ex is InvalidDataException or IOException or FormatException or ArgumentException or OverflowException or InvalidOperationException)
             {
                 return Problem("导入失败", $"无法读取文件：{ex.Message}");
             }
 
             var lookup = await quality.LoadCategoryLookupAsync();
-            var (created, updated) = await repo.ImportAsync(parsed.Rows.Select(row =>
-                (row.Draft, (Action<ProductRecord>)(p => ProductQualityService.Apply(p, lookup(p.CategoryId))))));
+            var (created, updated) = await repo.ImportAsync(parsed.Rows, p => ProductQualityService.Apply(p, lookup(p.CategoryId)));
             return Results.Ok(new ImportResult(created, updated, parsed.Skipped, parsed.Warnings, parsed.Headers, parsed.UnknownHeaders));
         }).DisableAntiforgery();
 
         catalog.MapPost("/quality-check", async (IdsRequest request, ProductRepository repo, ProductQualityService quality) =>
         {
             var lookup = await quality.LoadCategoryLookupAsync();
-            var checkedProducts = await repo.UpdateManyAsync(request.ProductIds, p => ProductQualityService.Apply(p, lookup(p.CategoryId)));
+            var checkedProducts = await repo.UpdateManyAsync(request.Ids, p => ProductQualityService.Apply(p, lookup(p.CategoryId)));
             return Results.Ok(new
             {
                 Total = checkedProducts.Count,
@@ -325,12 +350,18 @@ public static class ApiEndpoints
             });
         });
 
+        catalog.MapPost("/pull-from-alibaba", async (AlibabaCatalogSync sync, CancellationToken cancellationToken) =>
+        {
+            var (result, error) = await sync.PullAsync(cancellationToken);
+            return result is not null ? Results.Ok(result) : Problem("从 Alibaba 导入失败", AlibabaErrors.Explain(error!));
+        });
+
         catalog.MapPost("/predict-category", (IdsRequest request, ProductOperations operations) =>
-            RunEachAsync(request.ProductIds, operations.PredictCategoryAsync));
+            RunEachAsync(request.Ids, operations.PredictCategoryAsync));
 
         catalog.MapPost("/publish", async (IdsRequest request, IConfiguration config, AlibabaTokenService tokens, PublishJobStore jobs, PublishQueue queue, ProductRepository repo, TimeProvider time) =>
         {
-            var ids = request.ProductIds.Distinct().ToArray();
+            var ids = request.Ids;
             if (ids.Length == 0) return Problem("请先选择商品");
 
             var settings = AlibabaSettings.FromConfiguration(config);
@@ -360,22 +391,24 @@ public static class ApiEndpoints
         catalog.MapGet("/publish-jobs/{id:guid}", async (Guid id, PublishJobStore jobs) =>
             await jobs.GetAsync(id) is { } job ? Results.Ok(job) : Results.NotFound());
 
-        catalog.MapPost("/sync/status", (IdsRequest request, ProductOperations operations) => RunEachAsync(request.ProductIds, operations.RefreshStatusAsync));
-        catalog.MapPost("/sync/inventory", (IdsRequest request, ProductOperations operations) => RunEachAsync(request.ProductIds, operations.SyncInventoryAsync));
-        catalog.MapPost("/sync/price", (IdsRequest request, ProductOperations operations) => RunEachAsync(request.ProductIds, operations.SyncPriceAsync));
+        catalog.MapPost("/sync/status", (IdsRequest request, ProductOperations operations) => RunEachAsync(request.Ids, operations.RefreshStatusAsync));
+        catalog.MapPost("/sync/inventory", (IdsRequest request, ProductOperations operations) => RunEachAsync(request.Ids, operations.SyncInventoryAsync));
+        catalog.MapPost("/sync/price", (IdsRequest request, ProductOperations operations) => RunEachAsync(request.Ids, operations.SyncPriceAsync));
         catalog.MapPost("/online", async (IdsRequest request, ProductOperations operations) =>
-            Results.Ok(BatchResult.From(await operations.SetOnlineAsync(request.ProductIds.Distinct().ToArray(), true))));
+            Results.Ok(BatchResult.From(await operations.SetOnlineAsync(request.Ids, true))));
         catalog.MapPost("/offline", async (IdsRequest request, ProductOperations operations) =>
-            Results.Ok(BatchResult.From(await operations.SetOnlineAsync(request.ProductIds.Distinct().ToArray(), false))));
+            Results.Ok(BatchResult.From(await operations.SetOnlineAsync(request.Ids, false))));
 
-        catalog.MapGet("/export/products.csv", async (string? ids, ProductRepository repo, ExportService export) =>
-        {
-            var selected = string.IsNullOrWhiteSpace(ids)
-                ? await repo.GetAllAsync()
-                : await repo.GetManyAsync(ids.Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => Guid.TryParse(x, out var id) ? id : Guid.Empty));
-            return Results.File(export.BuildCsv(selected), "text/csv; charset=utf-8", $"soford-products-{DateTimeOffset.Now:yyyyMMddHHmmss}.csv");
-        });
+        catalog.MapGet("/export/products.csv", async (ProductRepository repo, ExportService export) =>
+            CsvFile(export, await repo.GetAllAsync()));
+
+        // Selections are posted rather than put in the query string, which nginx caps at 8 KB (~220 ids).
+        catalog.MapPost("/export/products.csv", async (IdsRequest request, ProductRepository repo, ExportService export) =>
+            CsvFile(export, request.Ids.Length == 0 ? await repo.GetAllAsync() : await repo.GetManyAsync(request.Ids)));
     }
+
+    private static IResult CsvFile(ExportService export, IEnumerable<ProductRecord> products) =>
+        Results.File(export.BuildCsv(products), "text/csv; charset=utf-8", $"soford-products-{DateTimeOffset.Now:yyyyMMddHHmmss}.csv");
 
     private static async Task<IResult> RunEachAsync(Guid[] ids, Func<Guid, Task<OperationItemResult>> operation)
     {

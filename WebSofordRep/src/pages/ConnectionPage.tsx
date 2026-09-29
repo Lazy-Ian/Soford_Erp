@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
-import { AlertTriangle, CheckCircle2, ExternalLink, KeyRound, RefreshCw, ShieldCheck, Stethoscope, Unplug, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ExternalLink, KeyRound, RefreshCw, ShieldCheck, Stethoscope, Timer, Unplug, XCircle } from 'lucide-react'
 import clsx from 'clsx'
-import { api, errorText, post, type DiagnosticCheck } from '../api'
+import { api, errorText, post, type AutomationStatus, type DiagnosticCheck } from '../api'
 import { Pill, Spinner } from '../components/ui'
 import { useApp } from '../context'
 import { useInitialLoad } from '../hooks'
@@ -152,6 +152,8 @@ export function ConnectionPage() {
         </div>
       </section>
 
+      <AutomationCard />
+
       <section className="card">
         <div className="card-head">
           <div>
@@ -168,5 +170,57 @@ export function ConnectionPage() {
         </ul>
       </section>
     </div>
+  )
+}
+
+function AutomationCard() {
+  const { notify, refreshAlibaba } = useApp()
+  const [status, setStatus] = useState<AutomationStatus | null>(null)
+  const [running, setRunning] = useState(false)
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await api<AutomationStatus>('/api/system/automation'))
+    } catch (err) {
+      notify('error', errorText(err, '读取自动同步状态失败'))
+    }
+  }, [notify])
+
+  useInitialLoad(load)
+
+  const runNow = async () => {
+    setRunning(true)
+    try {
+      const result = await post<AutomationStatus>('/api/system/automation/run')
+      setStatus(result)
+      notify('success', result.lastMessage || '同步完成。')
+      await refreshAlibaba()
+    } catch (err) {
+      notify('error', errorText(err, '同步失败'))
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="card-head">
+        <div>
+          <strong>自动同步</strong>
+          <span>后台定时续期 Token，并查询「审核中」商品的最新状态，无需手动点击。</span>
+        </div>
+        <Pill tone={status?.enabled ? 'good' : 'neutral'}>{status?.enabled ? `每 ${status.intervalMinutes} 分钟` : '未开启'}</Pill>
+      </div>
+      <dl className="facts">
+        <dt>上次运行</dt><dd>{formatDate(status?.lastRunAt)}</dd>
+        <dt>下次运行</dt><dd>{formatDate(status?.nextRunAt)}</dd>
+        <dt>结果</dt><dd>{status?.lastMessage || '-'}</dd>
+      </dl>
+      <div className="actions left">
+        <button type="button" onClick={() => void runNow()} disabled={running}>
+          {running ? <Spinner /> : <Timer size={16} />} 立即同步
+        </button>
+      </div>
+    </section>
   )
 }

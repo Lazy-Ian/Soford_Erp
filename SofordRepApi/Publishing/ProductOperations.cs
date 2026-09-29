@@ -1,14 +1,61 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
+
+/// <summary>
+/// Serializes Alibaba operations per product so a status poll, a publish and a price sync never interleave
+/// their read → call Alibaba → write steps and overwrite each other's results.
+/// </summary>
+public sealed class ProductLocks
+{
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _locks = new();
+
+    public async Task<IDisposable> AcquireAsync(IEnumerable<Guid> ids)
+    {
+        // A fixed order keeps multi-product operations from deadlocking each other.
+        var ordered = ids.Distinct().OrderBy(x => x).Select(id => _locks.GetOrAdd(id, _ => new SemaphoreSlim(1, 1))).ToList();
+        var taken = new List<SemaphoreSlim>();
+        try
+        {
+            foreach (var semaphore in ordered)
+            {
+                await semaphore.WaitAsync();
+                taken.Add(semaphore);
+            }
+        }
+        catch
+        {
+            taken.ForEach(x => x.Release());
+            throw;
+        }
+
+        return new Releaser(taken);
+    }
+
+    public Task<IDisposable> AcquireAsync(Guid id) => AcquireAsync([id]);
+
+    private sealed class Releaser(List<SemaphoreSlim> held) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0) held.ForEach(x => x.Release());
+        }
+    }
+}
 
 /// <summary>Per-product Alibaba operations. Each one persists the outcome on the product and never throws for API errors.</summary>
 public sealed class ProductOperations(
     ProductRepository products,
     ProductQualityService quality,
     AlibabaClient alibaba,
-    TimeProvider time)
+    ProductLocks locks,
+    TimeProvider time,
+    ILogger<ProductOperations> logger)
 {
     public async Task<OperationItemResult> PublishAsync(Guid productId)
     {
+        using var _ = await locks.AcquireAsync(productId);
         var product = await products.GetAsync(productId);
         if (product is null)
         {
@@ -27,7 +74,6 @@ public sealed class ProductOperations(
             return new(productId, product.Sku, false, "质检未通过：" + string.Join("；", blockers.Select(x => x.Message.TrimEnd('。'))) + "。");
         }
 
-        var isUpdate = !string.IsNullOrWhiteSpace(product.RemoteProductId);
         var previousState = product.PublishState;
         await products.UpdateAsync(productId, p =>
         {
@@ -36,31 +82,95 @@ public sealed class ProductOperations(
             p.PublishState = PublishState.Publishing;
         });
 
+        var progress = new PublishProgress();
+        try
+        {
+            return await PublishCoreAsync(product, previousState, progress);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Publishing product {ProductId} failed unexpectedly", productId);
+            if (progress.Committed)
+            {
+                // Alibaba accepted the listing and we saved it; only the follow-up status query failed.
+                return new(productId, product.Sku, true, $"已提交到 Alibaba，但查询状态出错：{ex.Message}", progress.RemoteId, "publish");
+            }
+
+            // Never leave a product stuck in "Publishing" because of an unexpected error.
+            await products.UpdateAsync(productId, p =>
+            {
+                p.PublishState = previousState == PublishState.Publishing ? PublishState.Failed : previousState;
+                p.RemoteStatusMessage = $"发布出错：{ex.Message}";
+            });
+            return new(productId, product.Sku, false, $"发布出错：{ex.Message}", product.RemoteProductId, "publish");
+        }
+    }
+
+    private sealed class PublishProgress
+    {
+        public bool Committed { get; set; }
+        public string? RemoteId { get; set; }
+    }
+
+    private async Task<OperationItemResult> PublishCoreAsync(ProductRecord product, PublishState previousState, PublishProgress progress)
+    {
+        var productId = product.Id;
+
+        // Guard against duplicate listings: only when an earlier create for THIS product ended without a known outcome
+        // (timeout, crash before the ID was saved) do we look for the listing it may have created.
+        if (string.IsNullOrWhiteSpace(product.RemoteProductId) && product.CreateAttemptedAt is { } earlierAttempt)
+        {
+            var existingId = await FindRemoteIdAsync(product, earlierAttempt);
+            if (existingId is not null)
+            {
+                product.RemoteProductId = existingId;
+                await products.UpdateAsync(productId, p => p.RemoteProductId = existingId);
+            }
+        }
+
+        var isUpdate = !string.IsNullOrWhiteSpace(product.RemoteProductId);
+        var action = isUpdate ? "update" : "create";
+        var sentContent = product.ContentUpdatedAt;
+        var attemptAt = time.GetUtcNow();
+        if (!isUpdate)
+        {
+            await products.UpdateAsync(productId, p => p.CreateAttemptedAt = attemptAt);
+        }
+
         var result = isUpdate
             ? await alibaba.CallAsync("product.update", ListingMapper.BuildUpdatePayload(product))
             : await alibaba.CallAsync("product.create", ListingMapper.BuildCreatePayload(product));
-        var action = isUpdate ? "update" : "create";
 
-        if (!result.Success)
+        string? remoteId = isUpdate ? product.RemoteProductId : null;
+        if (!isUpdate && result.Success) remoteId = ExtractProductId(result.Json);
+
+        // A timed-out create may still have succeeded on Alibaba; look it up before calling it a failure.
+        if (!isUpdate && (result.ErrorCode == "NetworkError" || (result.Success && string.IsNullOrWhiteSpace(remoteId))))
+        {
+            remoteId = await FindRemoteIdAsync(product, attemptAt);
+            if (remoteId is null)
+            {
+                await products.UpdateAsync(productId, p =>
+                {
+                    p.PublishState = PublishState.Failed;
+                    p.RemoteStatusMessage = result.Success
+                        ? "Alibaba 返回成功但没有商品 ID，也未查到该商品，请在 API 日志中查看原始响应。"
+                        : "网络异常，未能确认是否创建成功。重新发布时系统会先按型号查重，不会重复创建。";
+                });
+                return new(productId, product.Sku, false, result.Success ? "Alibaba 返回成功但没有商品 ID。" : AlibabaErrors.Explain(result), null, action);
+            }
+        }
+        else if (!result.Success)
         {
             await products.UpdateAsync(productId, p =>
             {
                 // A failed update leaves the existing Alibaba listing as it was.
-                p.PublishState = isUpdate ? previousState : PublishState.Failed;
+                p.PublishState = isUpdate ? RestorableState(previousState) : PublishState.Failed;
+                // Alibaba rejected the create outright, so there is no listing to look for next time.
+                if (!isUpdate) p.CreateAttemptedAt = null;
                 p.RemoteStatusMessage = $"{(isUpdate ? "更新" : "发布")}失败：{result.Describe()}";
             });
             return new(productId, product.Sku, false, AlibabaErrors.Explain(result), product.RemoteProductId, action);
-        }
-
-        var remoteId = isUpdate ? product.RemoteProductId : ExtractProductId(result.Json);
-        if (string.IsNullOrWhiteSpace(remoteId))
-        {
-            await products.UpdateAsync(productId, p =>
-            {
-                p.PublishState = PublishState.Failed;
-                p.RemoteStatusMessage = "Alibaba 返回成功但没有商品 ID，请在 API 日志中查看原始响应。";
-            });
-            return new(productId, product.Sku, false, "Alibaba 返回成功但没有商品 ID。", null, action);
         }
 
         await products.UpdateAsync(productId, p =>
@@ -70,14 +180,61 @@ public sealed class ProductOperations(
             p.RemoteStatus = "pending";
             p.RemoteStatusMessage = isUpdate ? "已提交更新，等待 Alibaba 审核。" : "已提交发布，等待 Alibaba 审核。";
             p.LastPublishedAt = time.GetUtcNow();
+            // Edits saved while this call was in flight keep a newer ContentUpdatedAt and stay flagged as unpublished.
+            p.PublishedContentAt = sentContent;
+            p.CreateAttemptedAt = null;
         });
+        progress.Committed = true;
+        progress.RemoteId = remoteId;
 
-        var status = await RefreshStatusAsync(productId);
+        var status = await RefreshStatusCoreAsync(productId);
         var message = (isUpdate ? "更新成功" : "发布成功") + $"，Alibaba 商品 ID {remoteId}" + (status.Success ? $"，当前状态：{status.Message}" : "");
         return new(productId, product.Sku, true, message, remoteId, action);
     }
 
+    private static PublishState RestorableState(PublishState state) => state == PublishState.Publishing ? PublishState.Pending : state;
+
+    /// <summary>
+    /// Finds the listing a create attempt of this product may have produced: same model number, not already linked to
+    /// another local product, and (when Alibaba reports it) created no earlier than the attempt. Older or foreign listings
+    /// that merely share a model number are never adopted.
+    /// </summary>
+    private async Task<string?> FindRemoteIdAsync(ProductRecord product, DateTimeOffset attemptAt)
+    {
+        var modelNumber = ListingMapper.RemoteModelNumber(product);
+        if (string.IsNullOrWhiteSpace(modelNumber)) return null;
+
+        var result = await alibaba.CallAsync("product.search", new { page_index = 1, page_size = 20, model_number = modelNumber });
+        if (!result.Success || result.Json is null) return null;
+        if (AlibabaResponseParser.Find(result.Json.Value, "product_info") is not { ValueKind: JsonValueKind.Array } items) return null;
+
+        var linkedElsewhere = (await products.GetAllAsync())
+            .Where(x => x.Id != product.Id && !string.IsNullOrWhiteSpace(x.RemoteProductId))
+            .Select(x => x.RemoteProductId!)
+            .ToHashSet();
+        var earliest = attemptAt.AddMinutes(-10).ToUnixTimeMilliseconds();
+
+        var candidates = items.EnumerateArray()
+            .Select(item => item.TryGetProperty("basic_info", out var basic) ? basic : default)
+            .Where(basic => string.Equals(AlibabaResponseParser.Text(basic, "model_number"), modelNumber, StringComparison.OrdinalIgnoreCase))
+            .Select(basic => (Id: AlibabaResponseParser.Text(basic, "product_id"), Created: AlibabaResponseParser.ReadLong(basic, "create_timestamp")))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Id) && !linkedElsewhere.Contains(x.Id!))
+            // create_timestamp may be seconds or milliseconds; normalise to milliseconds. 0 means Alibaba did not report it.
+            .Select(x => (x.Id, Created: x.Created is > 0 and < 100_000_000_000 ? x.Created * 1000 : x.Created))
+            .Where(x => x.Created == 0 || x.Created >= earliest)
+            .ToList();
+
+        // Ambiguity is resolved by refusing to guess: two unlinked candidates means we cannot tell which is ours.
+        return candidates.Count == 1 ? candidates[0].Id : null;
+    }
+
     public async Task<OperationItemResult> RefreshStatusAsync(Guid productId)
+    {
+        using var _ = await locks.AcquireAsync(productId);
+        return await RefreshStatusCoreAsync(productId);
+    }
+
+    private async Task<OperationItemResult> RefreshStatusCoreAsync(Guid productId)
     {
         var (product, error) = await LoadPublishedAsync(productId);
         if (product is null) return error!;
@@ -103,6 +260,7 @@ public sealed class ProductOperations(
 
     public async Task<OperationItemResult> SyncInventoryAsync(Guid productId)
     {
+        using var _ = await locks.AcquireAsync(productId);
         var (product, error) = await LoadPublishedAsync(productId);
         if (product is null) return error!;
 
@@ -112,6 +270,7 @@ public sealed class ProductOperations(
 
     public async Task<OperationItemResult> SyncPriceAsync(Guid productId)
     {
+        using var _ = await locks.AcquireAsync(productId);
         var (product, error) = await LoadPublishedAsync(productId);
         if (product is null) return error!;
 
@@ -127,6 +286,7 @@ public sealed class ProductOperations(
 
     public async Task<List<OperationItemResult>> SetOnlineAsync(IReadOnlyList<Guid> productIds, bool online)
     {
+        using var _ = await locks.AcquireAsync(productIds);
         var items = new List<OperationItemResult>();
         var eligible = new List<ProductRecord>();
         foreach (var id in productIds)
@@ -168,6 +328,7 @@ public sealed class ProductOperations(
 
     public async Task<OperationItemResult> PredictCategoryAsync(Guid productId)
     {
+        using var _ = await locks.AcquireAsync(productId);
         var product = await products.GetAsync(productId);
         if (product is null) return new(productId, "", false, "商品不存在。");
         if (string.IsNullOrWhiteSpace(product.Title)) return new(productId, product.Sku, false, "请先填写商品标题。");
@@ -185,21 +346,15 @@ public sealed class ProductOperations(
 
         var name = AlibabaResponseParser.ScalarText(AlibabaResponseParser.Find(result.Json!.Value, "category_name")) ?? "";
         var path = AlibabaResponseParser.ScalarText(AlibabaResponseParser.Find(result.Json!.Value, "category_path")) ?? "";
-        var updated = await products.UpdateAsync(productId, p =>
+        var lookup = await quality.LoadCategoryLookupAsync();
+        await products.UpdateAsync(productId, p =>
         {
             p.CategoryId = categoryId;
             p.CategoryName = name;
             p.CategoryPath = path;
+            p.ContentUpdatedAt = time.GetUtcNow();
+            ProductQualityService.Apply(p, lookup(categoryId));
         });
-        if (updated is not null)
-        {
-            await quality.ApplyAsync(updated);
-            await products.UpdateAsync(productId, p =>
-            {
-                p.QualityIssues = updated.QualityIssues;
-                p.LocalState = updated.LocalState;
-            });
-        }
 
         return new(productId, product.Sku, true, $"{categoryId} {(path.Length > 0 ? path : name)}", null, "predict");
     }
@@ -211,6 +366,11 @@ public sealed class ProductOperations(
         if (string.IsNullOrWhiteSpace(product.RemoteProductId) || !long.TryParse(product.RemoteProductId, out _))
         {
             return (null, new(productId, product.Sku, false, "该商品尚未发布到 Alibaba，请先发布。"));
+        }
+
+        if (product.PublishState == PublishState.Publishing)
+        {
+            return (null, new(productId, product.Sku, false, "该商品正在发布中，请稍后再试。", product.RemoteProductId));
         }
 
         return (product, null);

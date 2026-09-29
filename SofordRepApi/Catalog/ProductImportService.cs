@@ -4,7 +4,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 
-public sealed record ImportRow(int RowNumber, ProductDraft Draft);
+/// <summary>Present holds the canonical fields that had a column in the sheet; only those update existing products.</summary>
+public sealed record ImportRow(int RowNumber, ProductDraft Draft, IReadOnlySet<string> Present);
 
 public sealed record ImportParseResult(List<ImportRow> Rows, List<string> Warnings, string[] Headers, string[] UnknownHeaders, int Skipped);
 
@@ -51,7 +52,9 @@ public sealed partial class ProductImportService
         ("Keywords", false, "关键词，用 ; 分隔，最多 10 个", "bluetooth speaker;portable speaker;waterproof speaker"),
         ("BrandName", false, "品牌", "Soford"),
         ("ModelNumber", false, "型号", "SPK-001"),
+        ("Language", false, "语言，默认 en_US", "en_US"),
         ("CategoryId", false, "Alibaba 叶子类目 ID，留空可在系统中预测", "201896803"),
+        ("CategoryName", false, "类目名称（仅作参考）", "Speakers"),
         ("Attributes", false, "属性，格式 名称:值;名称:值", "Material:ABS;Color:Black;Place of Origin:China"),
         ("Currency", false, "币种，默认 USD", "USD"),
         ("Price", true, "单价（无阶梯价时必填）", "12.5"),
@@ -112,6 +115,7 @@ public sealed partial class ProductImportService
             throw new ImportFormatException("缺少 SKU 列（表头应为 Sku 或 商品编码）。请使用系统模板。");
         }
 
+        var present = columns.Keys.ToHashSet();
         var rows = new List<ImportRow>();
         var warnings = new List<string>();
         var skipped = 0;
@@ -140,7 +144,13 @@ public sealed partial class ProductImportService
             }
 
             decimal? OptionalDec(string field) => Get(field).Length == 0 ? null : Dec(field);
-            int Int(string field, int fallback = 0) => (int)Math.Round(Dec(field, fallback));
+            int Int(string field, int fallback = 0)
+            {
+                var value = Math.Round(Dec(field, fallback));
+                if (value is >= int.MinValue and <= int.MaxValue) return (int)value;
+                rowWarnings.Add($"{field}「{Get(field)}」超出范围");
+                return fallback;
+            }
 
             var images = SplitList(Get("Images"));
             if (images.Length == 0)
@@ -176,7 +186,7 @@ public sealed partial class ProductImportService
                 images,
                 false);
 
-            rows.Add(new ImportRow(rowNumber, draft));
+            rows.Add(new ImportRow(rowNumber, draft, present));
             if (rowWarnings.Count > 0)
             {
                 warnings.Add($"第 {rowNumber} 行（{sku}）：{string.Join("；", rowWarnings)}。");
@@ -375,6 +385,7 @@ public sealed partial class ProductImportService
         }
 
         help.Cell(TemplateColumns.Length + 3, 1).Value = "说明：第一个工作表「Products」用于导入；按 SKU 匹配，已存在的商品会被更新（保留 Alibaba 发布状态）。表头也支持中文别名，如 商品编码、标题、价格、起订量、库存、交期、图片。";
+        help.Cell(TemplateColumns.Length + 4, 1).Value = "只更新部分字段时，只保留 Sku 和需要修改的列即可（例如 Sku + Stock 只改库存）；表中存在但留空的列会把该字段清空。";
         help.Columns().AdjustToContents(1, 60);
 
         using var output = new MemoryStream();
@@ -402,7 +413,7 @@ public sealed class ExportService
             var values = new[]
             {
                 item.Sku, item.Title, item.Description, string.Join(';', item.Keywords), item.BrandName, item.ModelNumber,
-                item.CategoryId, string.Join(';', item.Attributes.Select(x => $"{x.Key}:{x.Value}")), item.Currency,
+                item.Language, item.CategoryId, item.CategoryName, string.Join(';', item.Attributes.Select(x => $"{x.Key}:{x.Value}")), item.Currency,
                 Number(item.Price), string.Join(';', item.TieredPrices.Select(x => $"{x.Quantity}:{Number(x.Price)}")),
                 item.MinimumOrderQuantity.ToString(CultureInfo.InvariantCulture), item.Unit, item.Stock.ToString(CultureInfo.InvariantCulture),
                 item.LeadTimeDays.ToString(CultureInfo.InvariantCulture), item.ShippingTemplateId, Number(item.WeightKg), Number(item.LengthCm),

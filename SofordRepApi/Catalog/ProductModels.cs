@@ -72,6 +72,18 @@ public sealed class ProductRecord
     public DateTimeOffset? LastPublishedAt { get; set; }
     public DateTimeOffset? LastSyncedAt { get; set; }
 
+    /// <summary>When listing content last changed locally (edit/import), as opposed to status-only writes.</summary>
+    public DateTimeOffset? ContentUpdatedAt { get; set; }
+
+    /// <summary>ContentUpdatedAt of the version last sent to Alibaba successfully.</summary>
+    public DateTimeOffset? PublishedContentAt { get; set; }
+
+    /// <summary>Set while a create call is in flight or ended without a known outcome; enables the duplicate check.</summary>
+    public DateTimeOffset? CreateAttemptedAt { get; set; }
+
+    public bool HasUnpublishedChanges =>
+        !string.IsNullOrWhiteSpace(RemoteProductId) && ContentUpdatedAt is not null && ContentUpdatedAt != PublishedContentAt;
+
     public List<QualityIssue> QualityIssues { get; set; } = [];
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -120,10 +132,7 @@ public sealed class ProductRecord
         CategoryId = Clean(draft.CategoryId);
         CategoryName = Clean(draft.CategoryName);
         CategoryPath = Clean(draft.CategoryPath);
-        Attributes = new Dictionary<string, string>(
-            (draft.Attributes ?? new()).Where(x => !string.IsNullOrWhiteSpace(x.Key) && !string.IsNullOrWhiteSpace(x.Value))
-                .ToDictionary(x => x.Key.Trim(), x => x.Value.Trim(), StringComparer.OrdinalIgnoreCase),
-            StringComparer.OrdinalIgnoreCase);
+        Attributes = CleanAttributes(draft.Attributes);
         Currency = string.IsNullOrWhiteSpace(draft.Currency) ? "USD" : draft.Currency.Trim().ToUpperInvariant();
         Price = draft.Price;
         TieredPrices = (draft.TieredPrices ?? []).Where(x => x.Quantity > 0 || x.Price > 0).OrderBy(x => x.Quantity).ToList();
@@ -138,6 +147,78 @@ public sealed class ProductRecord
         HeightCm = draft.HeightCm;
         Images = CleanList(draft.Images).ToArray();
         AiOptimize = draft.AiOptimize;
+    }
+
+    /// <summary>
+    /// Import-time update of an existing product: only columns present in the sheet are copied,
+    /// so a sheet with just Sku + Stock never blanks titles, images or prices.
+    /// </summary>
+    public void ApplyImportedFields(ProductDraft draft, IReadOnlySet<string> present)
+    {
+        var incoming = new ProductRecord();
+        incoming.ApplyDraft(draft);
+        bool Has(params string[] fields) => fields.Any(present.Contains);
+
+        if (Has("Title")) Title = incoming.Title;
+        if (Has("Description")) Description = incoming.Description;
+        if (Has("Keywords")) Keywords = incoming.Keywords;
+        if (Has("BrandName")) BrandName = incoming.BrandName;
+        if (Has("ModelNumber")) ModelNumber = incoming.ModelNumber;
+        if (Has("Language")) Language = incoming.Language;
+        if (Has("CategoryId") && CategoryId != incoming.CategoryId)
+        {
+            CategoryId = incoming.CategoryId;
+            // A new category invalidates the old name/path unless the sheet provides them too.
+            if (!Has("CategoryName")) CategoryName = "";
+            if (!Has("CategoryPath")) CategoryPath = "";
+        }
+
+        if (Has("CategoryName")) CategoryName = incoming.CategoryName;
+        if (Has("CategoryPath")) CategoryPath = incoming.CategoryPath;
+        if (Has("Attributes")) Attributes = incoming.Attributes;
+        if (Has("Currency")) Currency = incoming.Currency;
+        if (Has("Price"))
+        {
+            // Tiers take precedence over the unit price, so a sheet that sets only Price means "single price".
+            if (!Has("TieredPrices") && Price != incoming.Price) TieredPrices = [];
+            Price = incoming.Price;
+        }
+
+        if (Has("TieredPrices")) TieredPrices = incoming.TieredPrices;
+        if (Has("MOQ")) MinimumOrderQuantity = incoming.MinimumOrderQuantity;
+        if (Has("Unit")) Unit = incoming.Unit;
+        if (Has("Stock")) Stock = incoming.Stock;
+        if (Has("LeadTimeDays")) LeadTimeDays = incoming.LeadTimeDays;
+        if (Has("ShippingTemplateId")) ShippingTemplateId = incoming.ShippingTemplateId;
+        if (Has("WeightKg")) WeightKg = incoming.WeightKg;
+        if (Has("LengthCm")) LengthCm = incoming.LengthCm;
+        if (Has("WidthCm")) WidthCm = incoming.WidthCm;
+        if (Has("HeightCm")) HeightCm = incoming.HeightCm;
+        if (Has("Images", "MainImageUrl", "DetailImageUrls")) Images = incoming.Images;
+    }
+
+    /// <summary>Serialized listing content, used to tell real edits apart from no-op re-imports.</summary>
+    public string ContentSignature() => JsonSerializer.Serialize(new
+    {
+        Sku, Title, Description, Keywords, BrandName, ModelNumber, Language, CategoryId, CategoryName, CategoryPath,
+        Attributes = Attributes.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase).ToArray(),
+        Currency, Price, TieredPrices, MinimumOrderQuantity, Unit, Stock, LeadTimeDays, ShippingTemplateId,
+        WeightKg, LengthCm, WidthCm, HeightCm, Images, AiOptimize
+    });
+
+    private static Dictionary<string, string> CleanAttributes(Dictionary<string, string>? attributes)
+    {
+        // Keys differing only by case or whitespace collapse; the last value wins.
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in attributes ?? new())
+        {
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+            {
+                result[key.Trim()] = value.Trim();
+            }
+        }
+
+        return result;
     }
 
     private static string Clean(string? value) => value?.Trim() ?? "";
@@ -178,9 +259,16 @@ public sealed class PublishStateConverter : JsonConverter<PublishState>
 {
     public override PublishState Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
-        if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var number) && Enum.IsDefined(typeof(PublishState), number))
+        // This converter always writes names, so numbers only come from the previous release,
+        // whose enum was Draft=0, Ready=1, Published=2, Failed=3.
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out var number))
         {
-            return (PublishState)number;
+            return number switch
+            {
+                2 => PublishState.Online,
+                3 => PublishState.Failed,
+                _ => PublishState.NotPublished
+            };
         }
 
         var text = reader.TokenType == JsonTokenType.String ? reader.GetString() : null;

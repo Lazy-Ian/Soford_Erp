@@ -7,7 +7,8 @@ services:
     volumes:
       - soford_api_data:/app/App_Data
     ports:
-      - "5153:8080"
+      # Loopback only: the API trusts X-Forwarded-* headers, so it must sit behind the web proxy.
+      - "127.0.0.1:5153:8080"
 
   web:
     build:

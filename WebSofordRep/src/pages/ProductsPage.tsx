@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDownToLine, ArrowUpFromLine, CheckCircle2, Download, FileSpreadsheet, Layers3, PackageCheck, Pencil,
+  ArrowDownToLine, ArrowUpFromLine, CheckCircle2, CloudDownload, Download, FileSpreadsheet, Layers3, PackageCheck, Pencil,
   Plus, RefreshCw, Rocket, Search, Tags, Trash2, Upload, Warehouse, DollarSign,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { api, errorText, post, type BatchResult, type ImportResult, type Product, type ProductDraft, type PublishJob, type PublishState } from '../api'
+import { api, errorText, post, type BatchResult, type ImportResult, type Product, type ProductDraft, type PublishJob, type PublishState, type PullResult } from '../api'
 import { BatchResultDialog, Modal, Pagination, Pill, Spinner } from '../components/ui'
 import { useApp } from '../context'
 import { useInitialLoad } from '../hooks'
@@ -38,6 +38,8 @@ export function ProductsPage() {
   const [batch, setBatch] = useState<{ title: string; result: BatchResult } | null>(null)
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
   const [job, setJob] = useState<PublishJob | null>(null)
+  const [pollTick, setPollTick] = useState(0)
+  const [pullResult, setPullResult] = useState<PullResult | null>(null)
   const fileInput = useRef<HTMLInputElement | null>(null)
 
   const load = useCallback(async () => {
@@ -61,11 +63,13 @@ export function ProductsPage() {
         if (next.processed !== job.processed || next.status !== job.status) void load()
         setJob(next)
       } catch (err) {
-        notify('error', errorText(err, '查询发布进度失败'))
+        // Keep polling after a transient failure instead of freezing the progress bar.
+        notify('error', errorText(err, '查询发布进度失败，稍后重试'))
+        window.setTimeout(() => setPollTick((tick) => tick + 1), 3000)
       }
     }, 1500)
     return () => window.clearTimeout(timer)
-  }, [job, load, notify])
+  }, [job, pollTick, load, notify])
 
   const filtered = useMemo(() => {
     const key = query.trim().toLowerCase()
@@ -90,7 +94,7 @@ export function ProductsPage() {
     total: products.length,
     incomplete: products.filter((x) => x.localState === 'Incomplete').length,
     ready: products.filter((x) => x.localState === 'Ready' && x.publishState === 'NotPublished').length,
-    pending: products.filter((x) => x.publishState === 'Pending' || x.publishState === 'Publishing').length,
+    pending: products.filter((x) => x.publishState === 'Pending').length,
     online: products.filter((x) => x.publishState === 'Online').length,
     failed: products.filter((x) => x.publishState === 'Failed').length,
   }), [products])
@@ -162,6 +166,46 @@ export function ProductsPage() {
     })
   }
 
+  const pullFromAlibaba = () =>
+    confirm({
+      title: '从 Alibaba 导入商品',
+      confirmText: '开始导入',
+      message: (
+        <>
+          <p>读取 Alibaba 店铺中的全部商品：</p>
+          <ul className="plain">
+            <li>本系统没有的商品会新建；</li>
+            <li>SKU（型号）相同但未关联的商品会自动关联 Alibaba 商品 ID；</li>
+            <li>已关联的商品只更新 Alibaba 状态，不会覆盖本地已修改的内容。</li>
+          </ul>
+          <p className="muted">商品较多时需要一些时间（每页 20 个）。</p>
+        </>
+      ),
+      onConfirm: () =>
+        void run('pull', async () => {
+          setPullResult(await post<PullResult>('/api/catalog/pull-from-alibaba'))
+          await load()
+        }),
+    })
+
+  const exportCsv = () =>
+    run('export', async () => {
+      // POST keeps large selections out of the URL (nginx rejects very long query strings).
+      const response = await fetch('/api/catalog/export/products.csv', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productIds: selectedIds }),
+      })
+      if (!response.ok) throw new Error(`导出失败（${response.status}）`)
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `soford-products-${new Date().toISOString().slice(0, 10)}.csv`
+      link.click()
+      URL.revokeObjectURL(url)
+    })
+
   const setOnline = (online: boolean) =>
     confirm({
       title: online ? '上架商品' : '下架商品',
@@ -229,6 +273,9 @@ export function ProductsPage() {
         </div>
         <div className="actions">
           <button type="button" onClick={() => setEditing('new')}><Plus size={16} /> 新建</button>
+          <button type="button" onClick={pullFromAlibaba} disabled={busy !== null || needsAlibaba} title={alibabaHint ?? '把 Alibaba 店铺中已有的商品导入到本系统'}>
+            {busy === 'pull' ? <Spinner /> : <CloudDownload size={16} />} 从 Alibaba 导入
+          </button>
           <button type="button" onClick={() => downloadUrl('/api/catalog/import/template.xlsx')}><Download size={16} /> 模板</button>
           <button type="button" className="primary" onClick={() => fileInput.current?.click()} disabled={busy === 'import'} title="支持 .xlsx / .csv，也可以把文件拖到这里">
             {busy === 'import' ? <Spinner /> : <Upload size={16} />} 导入
@@ -267,7 +314,7 @@ export function ProductsPage() {
           {busy === 'offline' ? <Spinner /> : <ArrowDownToLine size={16} />} 下架
         </button>
         <span className="divider" />
-        <button type="button" onClick={() => downloadUrl(`/api/catalog/export/products.csv${none ? '' : `?ids=${selectedIds.join(',')}`}`)} title={none ? '导出全部商品' : '导出选中商品'}>
+        <button type="button" onClick={() => void exportCsv()} disabled={busy === 'export'} title={none ? '导出全部商品' : '导出选中商品'}>
           <FileSpreadsheet size={16} /> 导出 CSV
         </button>
         <button type="button" className="danger-text" onClick={() => remove(selectedIds)} disabled={none || busy !== null}><Trash2 size={16} /> 删除</button>
@@ -350,6 +397,7 @@ export function ProductsPage() {
                   </td>
                   <td className="col-state">
                     <Pill tone={publishStateTone[item.publishState]}>{publishStateLabel[item.publishState]}</Pill>
+                    {item.hasUnpublishedChanges && <Pill tone="warn">有未发布的修改</Pill>}
                     {item.remoteStatusMessage && <small className="muted clip" title={item.remoteStatusMessage}>{item.remoteStatusMessage}</small>}
                   </td>
                   <td className="col-actions row-actions">
@@ -415,6 +463,14 @@ export function ProductsPage() {
             ? <ul className="issues">{importResult.warnings.map((warning, index) => <li key={index} className="warning">{warning}</li>)}</ul>
             : <p className="good">没有警告。</p>}
           <p className="muted">导入后已自动质检，可在列表「质检」列查看每个商品的问题。</p>
+        </Modal>
+      )}
+
+      {pullResult && (
+        <Modal title="从 Alibaba 导入完成" subtitle={`读取 ${pullResult.total} 个商品（${pullResult.pages} 页）`} onClose={() => setPullResult(null)}>
+          <p>新建 {pullResult.created} 个，按 SKU 关联 {pullResult.linked} 个，更新状态 {pullResult.refreshed} 个。</p>
+          {pullResult.warnings.map((warning, index) => <p key={index} className="warn">{warning}</p>)}
+          {pullResult.created > 0 && <p className="muted">新建的商品已自动质检；多规格（SKU）商品在本系统中按单一价格和总库存显示。</p>}
         </Modal>
       )}
 

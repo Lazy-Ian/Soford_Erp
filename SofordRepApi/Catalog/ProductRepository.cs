@@ -36,6 +36,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
         product.Id = product.Id == Guid.Empty ? Guid.NewGuid() : product.Id;
         product.CreatedAt = time.GetUtcNow();
         product.UpdatedAt = product.CreatedAt;
+        product.ContentUpdatedAt ??= product.CreatedAt;
         all.Add(product);
         return product;
     });
@@ -49,8 +50,14 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
             return null;
         }
 
+        var skuBefore = product.Sku;
         mutate(product);
-        EnsureUniqueSku(all, product.Sku, product.Id);
+        // Only a changed SKU needs the uniqueness check, so status writes never fail on legacy duplicates.
+        if (!product.Sku.Equals(skuBefore, StringComparison.OrdinalIgnoreCase))
+        {
+            EnsureUniqueSku(all, product.Sku, product.Id);
+        }
+
         product.UpdatedAt = time.GetUtcNow();
         return product;
     });
@@ -72,25 +79,30 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
     }
 
     /// <summary>Upserts imported rows by SKU. Existing products keep their identity and Alibaba state.</summary>
-    public Task<(int Created, int Updated)> ImportAsync(IEnumerable<(ProductDraft Draft, Action<ProductRecord> AfterApply)> rows) => WriteAsync(all =>
+    public Task<(int Created, int Updated)> ImportAsync(IEnumerable<ImportRow> rows, Action<ProductRecord> afterApply) => WriteAsync(all =>
     {
         var created = 0;
         var updated = 0;
         var bySku = all.Where(x => x.Sku.Length > 0).GroupBy(x => x.Sku, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
-        foreach (var (draft, afterApply) in rows)
+        var now = time.GetUtcNow();
+        foreach (var row in rows)
         {
+            var draft = row.Draft;
             var sku = draft.Sku?.Trim() ?? "";
             if (bySku.TryGetValue(sku, out var existing))
             {
-                existing.ApplyDraft(draft);
+                var before = existing.ContentSignature();
+                existing.ApplyImportedFields(draft, row.Present);
                 afterApply(existing);
-                existing.UpdatedAt = time.GetUtcNow();
+                existing.UpdatedAt = now;
+                // Stock-only sheets are routine; only real content changes should flag a published product as unsynced.
+                if (existing.ContentSignature() != before) existing.ContentUpdatedAt = now;
                 updated++;
                 continue;
             }
 
-            var product = new ProductRecord { Id = Guid.NewGuid(), CreatedAt = time.GetUtcNow(), UpdatedAt = time.GetUtcNow() };
+            var product = new ProductRecord { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now, ContentUpdatedAt = now };
             product.ApplyDraft(draft);
             afterApply(product);
             all.Add(product);
@@ -101,11 +113,72 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
         return (created, updated);
     });
 
+    /// <summary>
+    /// Merges listings pulled from Alibaba. Already-linked products only get their remote status refreshed (local edits win);
+    /// an unlinked local product with the same SKU is linked; everything else becomes a new local product.
+    /// </summary>
+    /// <param name="snapshotAt">When the remote data was read; products published or synced after that keep their newer state.</param>
+    public Task<(int Created, int Linked, int Refreshed)> MergeRemoteAsync(IEnumerable<ProductRecord> remote, Action<ProductRecord> onCreated, DateTimeOffset snapshotAt) => WriteAsync(all =>
+    {
+        int created = 0, linked = 0, refreshed = 0;
+        var now = time.GetUtcNow();
+        foreach (var incoming in remote)
+        {
+            var existing = all.FirstOrDefault(x => x.RemoteProductId == incoming.RemoteProductId)
+                ?? UniqueUnlinkedMatch(all, incoming);
+            if (existing is not null)
+            {
+                if (existing.RemoteProductId == incoming.RemoteProductId) refreshed++; else linked++;
+                if (existing.PublishState == PublishState.Publishing || existing.LastPublishedAt > snapshotAt || existing.LastSyncedAt > snapshotAt)
+                {
+                    continue;
+                }
+
+                existing.RemoteProductId = incoming.RemoteProductId;
+                existing.RemoteStatus = incoming.RemoteStatus;
+                existing.PublishState = incoming.PublishState;
+                existing.RemoteStatusMessage = incoming.RemoteStatusMessage;
+                existing.LastSyncedAt = now;
+                existing.UpdatedAt = now;
+                continue;
+            }
+
+            if (all.Any(x => x.Sku.Equals(incoming.Sku, StringComparison.OrdinalIgnoreCase)))
+            {
+                incoming.Sku = $"{incoming.Sku}-{incoming.RemoteProductId}";
+            }
+
+            incoming.Id = Guid.NewGuid();
+            incoming.CreatedAt = now;
+            incoming.UpdatedAt = now;
+            incoming.ContentUpdatedAt = now;
+            incoming.PublishedContentAt = now;
+            onCreated(incoming);
+            all.Add(incoming);
+            created++;
+        }
+
+        return (created, linked, refreshed);
+    });
+
     public Task<int> DeleteManyAsync(IEnumerable<Guid> ids)
     {
         var set = ids.ToHashSet();
         return WriteAsync(all => all.RemoveAll(x => set.Contains(x.Id)));
     }
+
+    /// <summary>Links only when exactly one unlinked local product matches; ambiguous matches become new products instead.</summary>
+    private static ProductRecord? UniqueUnlinkedMatch(List<ProductRecord> all, ProductRecord incoming)
+    {
+        var matches = all.Where(x => string.IsNullOrWhiteSpace(x.RemoteProductId) && Matches(x, incoming)).Take(2).ToList();
+        return matches.Count == 1 ? matches[0] : null;
+    }
+
+    // Listings we create carry the SKU as model_number when no model number is set, so either can identify the local product.
+    private static bool Matches(ProductRecord local, ProductRecord remote) =>
+        remote.ModelNumber.Length > 0
+            ? local.Sku.Equals(remote.ModelNumber, StringComparison.OrdinalIgnoreCase) || local.ModelNumber.Equals(remote.ModelNumber, StringComparison.OrdinalIgnoreCase)
+            : local.Sku.Equals(remote.Sku, StringComparison.OrdinalIgnoreCase);
 
     private static void EnsureUniqueSku(List<ProductRecord> all, string sku, Guid id)
     {

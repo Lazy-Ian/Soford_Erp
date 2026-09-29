@@ -8,6 +8,8 @@ public sealed class AlibabaTransport(IHttpClientFactory httpClientFactory, Aliba
 {
     public const string HttpClientName = "alibaba";
 
+    private static readonly HashSet<string> SlowApis = new(StringComparer.OrdinalIgnoreCase) { "product.create", "product.update", "image.upload" };
+
     private static readonly HashSet<string> SecretParameters = new(StringComparer.OrdinalIgnoreCase)
     {
         "access_token", "refresh_token", "sign", "code", "app_secret"
@@ -45,11 +47,14 @@ public sealed class AlibabaTransport(IHttpClientFactory httpClientFactory, Aliba
         using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = BuildContent(parameters, file) };
         var stopwatch = Stopwatch.StartNew();
         AlibabaApiResult result;
+        // Listing calls make Alibaba fetch every image, so they get far more time than lookups.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(SlowApis.Contains(apiKey) ? TimeSpan.FromSeconds(120) : TimeSpan.FromSeconds(30));
         try
         {
             var http = httpClientFactory.CreateClient(HttpClientName);
-            using var response = await http.SendAsync(request, cancellationToken);
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var response = await http.SendAsync(request, timeout.Token);
+            var body = await response.Content.ReadAsStringAsync(timeout.Token);
             var parsed = AlibabaResponseParser.Parse((int)response.StatusCode, body);
             result = new AlibabaApiResult(
                 apiKey,
@@ -63,7 +68,7 @@ public sealed class AlibabaTransport(IHttpClientFactory httpClientFactory, Aliba
                 parsed.Json,
                 parsed.Json is null ? AlibabaResponseParser.Truncate(body, 2000) : null);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        catch (Exception ex) when ((ex is HttpRequestException or TaskCanceledException) && !cancellationToken.IsCancellationRequested)
         {
             logger.LogWarning(ex, "Alibaba API {ApiKey} network failure", apiKey);
             result = new AlibabaApiResult(apiKey, path, false, 0, "NetworkError",
