@@ -192,6 +192,8 @@ public sealed class ProductOperations(
         return new(productId, product.Sku, true, message, remoteId, action);
     }
 
+    private const int MaxLookupPages = 15;
+
     private static PublishState RestorableState(PublishState state) => state == PublishState.Publishing ? PublishState.Pending : state;
 
     /// <summary>
@@ -204,9 +206,18 @@ public sealed class ProductOperations(
         var modelNumber = ListingMapper.RemoteModelNumber(product);
         if (string.IsNullOrWhiteSpace(modelNumber)) return null;
 
-        var result = await alibaba.CallAsync("product.search", new { page_index = 1, page_size = 20, model_number = modelNumber });
-        if (!result.Success || result.Json is null) return null;
-        if (AlibabaResponseParser.Find(result.Json.Value, "product_info") is not { ValueKind: JsonValueKind.Array } items) return null;
+        // Real stores reuse model numbers across dozens of listings and search results are not ordered by
+        // creation time, so walk the pages (bounded) instead of trusting page 1.
+        var items = new List<JsonElement>();
+        for (var page = 1; page <= MaxLookupPages; page++)
+        {
+            var result = await alibaba.CallAsync("product.search", new { page_index = page, page_size = AlibabaCatalogSync.PageSize, model_number = modelNumber });
+            if (!result.Success || result.Json is null) return null;
+            if (AlibabaResponseParser.Find(result.Json.Value, "product_info") is not { ValueKind: JsonValueKind.Array } pageItems || pageItems.GetArrayLength() == 0) break;
+            items.AddRange(pageItems.EnumerateArray().Select(x => x.Clone()));
+            var totalPages = int.TryParse(AlibabaResponseParser.ScalarText(AlibabaResponseParser.Find(result.Json.Value, "total_page")), out var parsed) ? parsed : 1;
+            if (page >= totalPages) break;
+        }
 
         var linkedElsewhere = (await products.GetAllAsync())
             .Where(x => x.Id != product.Id && !string.IsNullOrWhiteSpace(x.RemoteProductId))
@@ -214,7 +225,7 @@ public sealed class ProductOperations(
             .ToHashSet();
         var earliest = attemptAt.AddMinutes(-10).ToUnixTimeMilliseconds();
 
-        var candidates = items.EnumerateArray()
+        var candidates = items
             .Select(item => item.TryGetProperty("basic_info", out var basic) ? basic : default)
             .Where(basic => string.Equals(AlibabaResponseParser.Text(basic, "model_number"), modelNumber, StringComparison.OrdinalIgnoreCase))
             .Select(basic => (Id: AlibabaResponseParser.Text(basic, "product_id"), Created: AlibabaResponseParser.ReadLong(basic, "create_timestamp")))

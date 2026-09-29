@@ -118,14 +118,15 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
     /// an unlinked local product with the same SKU is linked; everything else becomes a new local product.
     /// </summary>
     /// <param name="snapshotAt">When the remote data was read; products published or synced after that keep their newer state.</param>
-    public Task<(int Created, int Linked, int Refreshed)> MergeRemoteAsync(IEnumerable<ProductRecord> remote, Action<ProductRecord> onCreated, DateTimeOffset snapshotAt) => WriteAsync(all =>
+    /// <param name="noLink">Remote IDs that must never be linked to an existing local product by SKU/model number.</param>
+    public Task<(int Created, int Linked, int Refreshed)> MergeRemoteAsync(IEnumerable<ProductRecord> remote, Action<ProductRecord> onCreated, DateTimeOffset snapshotAt, IReadOnlySet<string>? noLink = null) => WriteAsync(all =>
     {
         int created = 0, linked = 0, refreshed = 0;
         var now = time.GetUtcNow();
         foreach (var incoming in remote)
         {
             var existing = all.FirstOrDefault(x => x.RemoteProductId == incoming.RemoteProductId)
-                ?? UniqueUnlinkedMatch(all, incoming);
+                ?? (noLink?.Contains(incoming.RemoteProductId!) == true ? null : UniqueUnlinkedMatch(all, incoming));
             if (existing is not null)
             {
                 if (existing.RemoteProductId == incoming.RemoteProductId) refreshed++; else linked++;

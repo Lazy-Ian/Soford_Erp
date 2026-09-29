@@ -45,8 +45,21 @@ public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository 
 
         if (totalPages > MaxPages) warnings.Add($"商品超过 {MaxPages * PageSize} 个，只导入了前 {MaxPages} 页。");
 
+        // A model number shared by several listings cannot identify one local product: give those listings
+        // unique SKUs and never auto-link them by model number.
+        var ambiguous = remote.Where(x => x.ModelNumber.Length > 0)
+            .GroupBy(x => x.ModelNumber, StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() > 1)
+            .SelectMany(g => g)
+            .ToList();
+        foreach (var product in ambiguous)
+        {
+            product.Sku = $"{product.ModelNumber}-{product.RemoteProductId}";
+        }
+
         var lookup = await quality.LoadCategoryLookupAsync();
-        var (created, linked, refreshed) = await products.MergeRemoteAsync(remote, p => ProductQualityService.Apply(p, lookup(p.CategoryId)), snapshotAt);
+        var (created, linked, refreshed) = await products.MergeRemoteAsync(remote, p => ProductQualityService.Apply(p, lookup(p.CategoryId)), snapshotAt,
+            ambiguous.Select(x => x.RemoteProductId!).ToHashSet());
         return (new PullResult(remote.Count, created, linked, refreshed, pages, warnings), null);
     }
 

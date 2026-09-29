@@ -83,6 +83,23 @@ public class ReviewFixTests
     }
 
     [Fact]
+    public async Task PullNeverLinksListingsWhoseModelNumberIsShared()
+    {
+        var repo = NewRepository(out _);
+        await repo.CreateAsync(new ProductRecord { Sku = "FD02-2" });
+
+        var (created, linked, _) = await repo.MergeRemoteAsync(
+            [
+                new ProductRecord { Sku = "FD02-2-1", ModelNumber = "FD02-2", RemoteProductId = "1" },
+                new ProductRecord { Sku = "FD02-2-2", ModelNumber = "FD02-2", RemoteProductId = "2" }
+            ],
+            _ => { }, DateTimeOffset.UtcNow, new HashSet<string> { "1", "2" });
+
+        Assert.Equal((2, 0), (created, linked));
+        Assert.Null((await repo.GetAllAsync()).Single(x => x.Sku == "FD02-2").RemoteProductId);
+    }
+
+    [Fact]
     public void Import_HugeNumbersBecomeWarningsNotCrashes()
     {
         var parsed = new ProductImportService().Parse(new MemoryStream(Encoding.UTF8.GetBytes("Sku,Stock,MOQ\nA1,30000000000,5\n")), "p.csv");
