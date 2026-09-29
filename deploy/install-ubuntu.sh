@@ -22,13 +22,14 @@ fi
 sudo apt-get update -q
 sudo apt-get install -y -q nginx unzip rsync curl wget certbot
 
-if ! dpkg -s aspnetcore-runtime-8.0 >/dev/null 2>&1; then
+if ! command -v dotnet >/dev/null 2>&1 || ! dotnet --list-runtimes 2>/dev/null | grep -q '^Microsoft.AspNetCore.App 8\.'; then
   if ! apt-cache show aspnetcore-runtime-8.0 >/dev/null 2>&1; then
     wget -q https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O /tmp/packages-microsoft-prod.deb
     sudo dpkg -i /tmp/packages-microsoft-prod.deb
     sudo apt-get update -q
   fi
-  sudo apt-get install -y -q aspnetcore-runtime-8.0
+  # Reinstall as well as install: dpkg may report the package while its runtime files are missing.
+  sudo apt-get install -y -q --reinstall aspnetcore-runtime-8.0
 fi
 
 rm -rf "$RELEASE_DIR"
@@ -124,10 +125,10 @@ if echo "$needs_config" | grep -q "Auth__AdminPassword"; then
 else
   sudo systemctl restart soford-erp-api
   for _ in $(seq 1 30); do
-    if curl -fs http://127.0.0.1:5153/api/health >/dev/null; then break; fi
+    if curl -fs -H "Host: ${DOMAIN}" http://127.0.0.1:5153/api/health >/dev/null; then break; fi
     sleep 1
   done
-  if curl -fs http://127.0.0.1:5153/api/health >/dev/null; then
+  if curl -fs -H "Host: ${DOMAIN}" http://127.0.0.1:5153/api/health >/dev/null; then
     echo "API is running."
   else
     echo "API did not become healthy. Check: sudo journalctl -u soford-erp-api -n 50"

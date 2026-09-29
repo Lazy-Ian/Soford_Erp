@@ -2,6 +2,7 @@ param(
     [string]$Server = "39.106.188.160",
     [string]$User = "root",
     [string]$Domain = "erp.soford.cn",
+    [string]$IdentityFile = "$env:USERPROFILE\.ssh\stepnex_deployer_ed25519",
     # Optional: with an email the installer requests a Let's Encrypt certificate automatically.
     [string]$Email = "",
     [switch]$SkipBuild
@@ -13,6 +14,10 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Zip = Join-Path $Root "soford-erp-server.zip"
 $Installer = Join-Path $Root "deploy\install-ubuntu.sh"
 $Target = "$User@$Server"
+$SshArguments = @()
+if ($IdentityFile -and (Test-Path -LiteralPath $IdentityFile)) {
+    $SshArguments = @("-i", $IdentityFile, "-o", "BatchMode=yes")
+}
 
 function Invoke-Native {
     param(
@@ -39,15 +44,15 @@ if (-not (Test-Path $Installer)) {
 }
 
 Write-Host "Uploading package to $Target ..."
-Invoke-Native "scp" @($Zip, "${Target}:~/soford-erp-server.zip")
-Invoke-Native "scp" @($Installer, "${Target}:~/install-soford-erp.sh")
+Invoke-Native "scp" @($SshArguments + @($Zip, "${Target}:~/soford-erp-server.zip"))
+Invoke-Native "scp" @($SshArguments + @($Installer, "${Target}:~/install-soford-erp.sh"))
 
 Write-Host ""
 Write-Host "Running server installer. You may be asked for the server password and sudo password."
 Write-Host "This adds a separate Nginx site for $Domain and does not overwrite existing www.stepnex.cn config."
 Write-Host ""
 
-Invoke-Native "ssh" @("-t", $Target, "bash ~/install-soford-erp.sh '$Domain' '$Email'")
+Invoke-Native "ssh" @($SshArguments + @("-t", $Target, "bash ~/install-soford-erp.sh '$Domain' '$Email'"))
 
 Write-Host ""
 Write-Host "Upload/deploy step finished."
