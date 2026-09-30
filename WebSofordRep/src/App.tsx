@@ -27,6 +27,10 @@ const tabs: { key: TabKey; label: string; icon: typeof Boxes; advanced?: boolean
   { key: 'workbench', label: 'API 调试', icon: Code2, advanced: true, admin: true },
 ]
 
+/** Before the certificate exists the site runs on plain HTTP; passwords and data then cross the network unencrypted. */
+const insecure = window.location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname)
+const insecureText = '当前是 HTTP 明文连接，密码和数据可能被窃听。请尽快为域名启用 HTTPS（需先完成 ICP 备案），在此之前不要在公共网络中登录。'
+
 const readTab = (): TabKey => {
   const hash = window.location.hash.replace('#', '').split('/')[0] as TabKey
   return tabs.some((tab) => tab.key === hash) ? hash : 'overview'
@@ -173,6 +177,13 @@ function App() {
           </button>
         </header>
 
+        {insecure && (
+          <div className="banner bad top">
+            <AlertTriangle size={16} />
+            <span>{insecureText}</span>
+          </div>
+        )}
+
         {alibaba?.warning && (
           <div className="banner bad top">
             <AlertTriangle size={16} />
@@ -270,6 +281,7 @@ function LoginScreen({ onLogin, overlay }: { onLogin: (session: AuthSession) => 
         </div>
         <label>用户名<input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" /></label>
         <label>密码<input value={password} onChange={(e) => setPassword(e.target.value)} type="password" autoComplete="current-password" autoFocus /></label>
+        {insecure && <div className="form-error block">{insecureText}</div>}
         {error && <div className="form-error block">{error}</div>}
         <button type="submit" className="primary" disabled={busy || !password}>
           {busy ? <Spinner /> : <ShieldCheck size={16} />} 登录

@@ -63,8 +63,28 @@ ls -lh /opt/soford-erp/backups                # 备份列表
 ```bash
 sudo systemctl stop soford-erp-api
 sudo tar -xzf /opt/soford-erp/backups/soford-erp-<时间>.tar.gz -C /opt/soford-erp
-sudo chown -R www-data:www-data /opt/soford-erp/app_data
+sudo chown -R soford:soford /opt/soford-erp/app_data
 sudo systemctl start soford-erp-api
 ```
 
-注意：`app_data/data-protection-keys` 与 `alibaba-token.json` 必须一起保留，缺少密钥则 Token 无法解密，只能重新授权。
+注意：`app_data/data-protection-keys` 与 `alibaba-accounts.json` 必须一起保留，缺少密钥则 Token 无法解密，只能重新授权（系统会把解不开的账号文件改名为 `alibaba-accounts.json.unreadable-时间` 保留，找回密钥后可改回原名）。
+
+### 运行账号与沙箱
+
+API 以独立的系统账号 `soford` 运行（安装脚本自动创建），nginx 和服务器上的其他网站（`www-data`）读不到 Token、密钥和配置文件。systemd 还限制它只能写 `/opt/soford-erp/app_data`，程序目录和系统其他部分都是只读的。
+
+如果升级后服务起不来，安装脚本会自动回滚到上一版的程序和服务配置；查看原因：`sudo journalctl -u soford-erp-api -n 50`。
+
+### 异地备份
+
+每日备份默认只保存在本机 `/opt/soford-erp/backups`，磁盘损坏会一起丢失。建议开启异地备份：
+
+```bash
+sudo cp /opt/soford-erp/bin/backup-offsite.example.sh /opt/soford-erp/env/backup-offsite.sh
+sudo chmod 700 /opt/soford-erp/env/backup-offsite.sh
+sudo nano /opt/soford-erp/env/backup-offsite.sh   # 按注释选择 ossutil（阿里云 OSS）或 rclone，并删掉最后的 exit 1
+sudo systemctl start soford-erp-backup            # 试一次
+sudo journalctl -u soford-erp-backup -n 20        # 应看到 Off-site copy done.
+```
+
+备份包里有 Token、数据保护密钥和配置文件（含 AppSecret、管理员密码），目标存储必须是私有的。建议每季度演练一次从异地备份恢复。

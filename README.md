@@ -13,7 +13,7 @@ Alibaba.com 国际站（ICBU）商品发布工作台：导入/录入商品 → �
 | `WebSofordRep` | React + Vite 前端（中文界面） |
 | `deploy/` | Ubuntu 无 Docker 部署（Nginx + systemd） |
 
-数据保存在 `App_Data`（或 `Soford__DataPath`）：`products.json`、`publish-jobs.json`、`alibaba-token.json`（加密）、`alibaba-api-logs.json`、`category-attributes.json`。
+数据保存在 `App_Data`（或 `Soford__DataPath`）：`products.json`、`publish-jobs.json`、`alibaba-accounts.json`（各账号授权，加密）、`users.json`、`audit-log.json`、`automation.json`、`alibaba-api-logs.json`、`category-attributes.json`，以及加密用的 `data-protection-keys/`。
 
 ## 本地运行
 

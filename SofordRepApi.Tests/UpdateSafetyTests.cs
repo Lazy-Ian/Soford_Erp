@@ -205,4 +205,32 @@ public class UpdateSafetyTests
         Assert.False(result.Success);
         Assert.Equal(1, gateway.Calls.Count(x => x == "/alibaba/icbu/product/update/v2"));
     }
+
+    [Fact]
+    public async Task PriceSync_RefusedForListingsWithVariants()
+    {
+        var (operations, products, gateway) = await SetupAsync();
+        var product = await products.CreateAsync(Imported(DateTimeOffset.UtcNow.AddDays(-2)));
+        gateway.Bodies["/alibaba/icbu/product/get/v2"] = ListingJson(DateTimeOffset.UtcNow, variants: 4);
+
+        var result = await operations.SyncPriceAsync(product.Id);
+
+        Assert.False(result.Success);
+        Assert.Contains("4 个规格", result.Message);
+        Assert.DoesNotContain("/icbu/product/edit-price", gateway.Calls);
+        Assert.Equal(4, (await products.GetAsync(product.Id))!.RemoteSkuCount);
+    }
+
+    [Fact]
+    public async Task PriceSync_SentForSingleVariantListings()
+    {
+        var (operations, products, gateway) = await SetupAsync();
+        var product = await products.CreateAsync(Imported(DateTimeOffset.UtcNow.AddDays(-2)));
+        gateway.Bodies["/alibaba/icbu/product/get/v2"] = ListingJson(DateTimeOffset.UtcNow, variants: 1);
+
+        var result = await operations.SyncPriceAsync(product.Id);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains("/icbu/product/edit-price", gateway.Calls);
+    }
 }

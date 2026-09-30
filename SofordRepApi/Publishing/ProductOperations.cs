@@ -235,6 +235,20 @@ public sealed class ProductOperations(
         return null;
     }
 
+    /// <summary>
+    /// Listings with several variants keep price and stock per variant; writing one listing-level value would overwrite
+    /// all of them. Checked live because the stored variant count may predate an edit on Alibaba.
+    /// </summary>
+    private async Task<string?> VariantRefusalAsync(ProductRecord product, Guid? accountId, string what)
+    {
+        var (remote, result) = await ReadRemoteAsync(product, accountId);
+        if (remote is null) return $"无法读取 Alibaba 上的当前商品，为避免覆盖已停止同步{what}：{AlibabaErrors.Explain(result)}";
+        if (remote.RemoteSkuCount != product.RemoteSkuCount) await products.UpdateAsync(product.Id, p => p.RemoteSkuCount = remote.RemoteSkuCount);
+        return remote.RemoteSkuCount > 1
+            ? $"该商品在 Alibaba 上有 {remote.RemoteSkuCount} 个规格，{what}按规格分别设置，统一同步会覆盖各规格的{what}。请在 Alibaba 后台修改。"
+            : null;
+    }
+
     // Alibaba's review may touch the timestamp right after our own write.
     private static readonly TimeSpan ClockTolerance = TimeSpan.FromMinutes(2);
 
@@ -391,7 +405,9 @@ public sealed class ProductOperations(
             return new(productId, product.Sku, false, "本地库存为 0，为避免把 Alibaba 上的库存清零，已跳过。请先在商品中填写实际库存。", product.RemoteProductId, "inventory");
         }
 
-        var result = await alibaba.CallAsync("product.inventory.update", ListingMapper.BuildInventoryPayload(product), accountId: await AccountForAsync(product));
+        var accountId = await AccountForAsync(product);
+        if (await VariantRefusalAsync(product, accountId, "库存") is { } refusal) return new(productId, product.Sku, false, refusal, product.RemoteProductId, "inventory");
+        var result = await alibaba.CallAsync("product.inventory.update", ListingMapper.BuildInventoryPayload(product), accountId: accountId);
         return await RecordSyncAsync(product, result, "inventory", $"库存已同步为 {product.Stock}");
     }
 
@@ -407,7 +423,9 @@ public sealed class ProductOperations(
         }
 
         var tiers = string.Join("，", ListingMapper.EffectiveTiers(product).Select(x => $"≥{x.Quantity}: ${x.Price}"));
-        var result = await alibaba.CallAsync("product.price.update", ListingMapper.BuildPricePayload(product), accountId: await AccountForAsync(product));
+        var accountId = await AccountForAsync(product);
+        if (await VariantRefusalAsync(product, accountId, "价格") is { } refusal) return new(productId, product.Sku, false, refusal, product.RemoteProductId, "price");
+        var result = await alibaba.CallAsync("product.price.update", ListingMapper.BuildPricePayload(product), accountId: accountId);
         return await RecordSyncAsync(product, result, "price", $"价格已同步（{tiers}）");
     }
 

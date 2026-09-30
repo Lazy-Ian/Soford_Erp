@@ -28,3 +28,15 @@ chmod 600 "$target"
 ls -1t "$BACKUP_DIR"/soford-erp-*.tar.gz 2>/dev/null | tail -n +"$((KEEP + 1))" | xargs -r rm -f
 
 echo "Backup written: $target"
+
+# Optional off-site copy: a disk failure takes local backups with it. Configure by installing an executable
+# $APP_ROOT/env/backup-offsite.sh (see $APP_ROOT/bin/backup-offsite.example.sh); it receives the archive path.
+OFFSITE="$APP_ROOT/env/backup-offsite.sh"
+if [ -x "$OFFSITE" ]; then
+  if "$OFFSITE" "$target"; then
+    echo "Off-site copy done."
+  else
+    echo "Off-site copy FAILED; the local archive is kept." >&2
+    exit 1
+  fi
+fi

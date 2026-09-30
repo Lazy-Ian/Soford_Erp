@@ -152,3 +152,6 @@ api.MapUserEndpoints();
 app.MapGet("/openapi/callback", ApiEndpoints.CallbackAsync);
 
 app.Run();
+
+/// <summary>Visible to the integration tests (WebApplicationFactory&lt;Program&gt;).</summary>
+public partial class Program;

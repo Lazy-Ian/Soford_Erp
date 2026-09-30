@@ -50,6 +50,7 @@ if systemctl is-active --quiet soford-erp-api; then
   sudo systemctl stop soford-erp-api
 fi
 sudo install -m 750 "$RELEASE_DIR/deploy/backup/soford-erp-backup.sh" "$APP_ROOT/bin/soford-erp-backup.sh"
+sudo install -m 640 "$RELEASE_DIR/deploy/backup/backup-offsite.example.sh" "$APP_ROOT/bin/backup-offsite.example.sh"
 if [ -n "$(sudo ls -A "$APP_ROOT/app_data" 2>/dev/null)" ]; then
   if ! sudo "$APP_ROOT/bin/soford-erp-backup.sh"; then
     echo "Backup failed; restarting the existing version and aborting the upgrade."
@@ -57,10 +58,12 @@ if [ -n "$(sudo ls -A "$APP_ROOT/app_data" 2>/dev/null)" ]; then
     exit 1
   fi
 fi
-# Keep the running release so a failed upgrade can go back to it.
+# Keep the running release (binaries and unit file) so a failed upgrade can go back to it.
+UNIT_FILE=/etc/systemd/system/soford-erp-api.service
 if [ -n "$(sudo ls -A "$APP_ROOT/api" 2>/dev/null)" ]; then
   sudo rsync -a --delete "$APP_ROOT/api/" "$APP_ROOT/api.previous/"
   sudo rsync -a --delete "$APP_ROOT/web/" "$APP_ROOT/web.previous/"
+  if sudo test -f "$UNIT_FILE"; then sudo cp "$UNIT_FILE" "$APP_ROOT/api.previous.service"; fi
 fi
 
 rollback() {
@@ -68,6 +71,13 @@ rollback() {
     echo "Rolling back to the previous release ..."
     sudo rsync -a --delete "$APP_ROOT/api.previous/" "$APP_ROOT/api/"
     sudo rsync -a --delete "$APP_ROOT/web.previous/" "$APP_ROOT/web/"
+    if sudo test -f "$APP_ROOT/api.previous.service"; then
+      sudo cp "$APP_ROOT/api.previous.service" "$UNIT_FILE"
+      # The previous unit may run as another user; give it back the data directory.
+      prev_user="$(sudo sed -n 's/^User=//p' "$UNIT_FILE" | tail -n 1)"
+      if [ -n "$prev_user" ]; then sudo chown -R "$prev_user:$prev_user" "$APP_ROOT/app_data" || true; fi
+      sudo systemctl daemon-reload
+    fi
   fi
   sudo systemctl start soford-erp-api || true
 }
@@ -86,8 +96,16 @@ else
   echo "Keeping existing $ENV_FILE"
 fi
 
-sudo chown -R www-data:www-data "$APP_ROOT/api" "$APP_ROOT/web" "$APP_ROOT/app_data"
-sudo chown root:www-data "$ENV_FILE"
+# The API runs as its own system user; www-data (nginx, other sites) gets read-only access to the static web files only.
+if ! id soford >/dev/null 2>&1; then
+  sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin soford
+fi
+sudo chown -R root:root "$APP_ROOT/api" "$APP_ROOT/web"
+sudo chmod -R u=rwX,go=rX "$APP_ROOT/api" "$APP_ROOT/web"
+sudo chown -R soford:soford "$APP_ROOT/app_data"
+sudo chmod 750 "$APP_ROOT/app_data"
+sudo chown root:soford "$APP_ROOT/env" "$ENV_FILE"
+sudo chmod 750 "$APP_ROOT/env"
 sudo chmod 640 "$ENV_FILE"
 
 sudo cp "$RELEASE_DIR/deploy/systemd/soford-erp-api.service" /etc/systemd/system/soford-erp-api.service

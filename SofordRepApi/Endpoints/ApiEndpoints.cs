@@ -47,7 +47,7 @@ public static class ApiEndpoints
         api.MapPost("/auth/login", async (LoginRequest request, HttpContext http, IConfiguration config, IHostEnvironment env, LoginThrottle throttle, UserStore users, AuditLog audit) =>
         {
             var client = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            if (throttle.LockedFor(client) is { } wait)
+            if (throttle.LockedFor(client, request.Username) is { } wait)
             {
                 return Problem("登录失败次数过多", $"请 {Math.Ceiling(wait.TotalMinutes)} 分钟后再试。", StatusCodes.Status429TooManyRequests);
             }
@@ -71,11 +71,11 @@ public static class ApiEndpoints
             }
             else
             {
-                throttle.RecordFailure(client);
+                throttle.RecordFailure(client, username);
                 return Problem("用户名或密码错误", status: StatusCodes.Status401Unauthorized);
             }
 
-            throttle.Reset(client);
+            throttle.Reset(client, username);
             var identity = new ClaimsIdentity(
                 [new Claim(ClaimTypes.Name, displayName), new Claim(ClaimTypes.Role, role), .. claims],
                 CookieAuthenticationDefaults.AuthenticationScheme);
@@ -398,8 +398,8 @@ public static class ApiEndpoints
 
         products.MapDelete("/{id:guid}", async (Guid id, ProductRepository repo, ClaimsPrincipal principal, AccessService access, AuditLog audit) =>
         {
-            var (allowed, denied) = await AllowedAsync([id], principal, access, repo);
-            if (denied is not null) return denied;
+            // Like GET, someone else's product is simply "not found" rather than confirming that it exists.
+            var (allowed, _) = await AllowedAsync([id], principal, access, repo);
             if (allowed.Length == 0 || await repo.DeleteManyAsync(allowed) == 0) return Results.NotFound();
             await audit.RecordAsync(await access.CurrentAsync(principal), "删除商品", "删除 1 个商品（仅本系统）", 1);
             return Results.NoContent();

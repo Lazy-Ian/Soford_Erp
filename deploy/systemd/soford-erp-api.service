@@ -8,8 +8,26 @@ ExecStart=/usr/bin/dotnet /opt/soford-erp/api/SofordRepApi.dll
 Restart=always
 RestartSec=5
 SyslogIdentifier=soford-erp-api
-User=www-data
+# A dedicated account: nginx and other sites on this server (www-data) cannot read tokens, keys or the env file.
+User=soford
+Group=soford
 EnvironmentFile=/opt/soford-erp/env/soford-api.env
+Environment=DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
+
+# Sandbox: the API only writes its data directory; binaries and the rest of the system are read-only.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/soford-erp/app_data
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+# Not MemoryDenyWriteExecute: the .NET JIT needs writable+executable memory.
 
 [Install]
 WantedBy=multi-user.target

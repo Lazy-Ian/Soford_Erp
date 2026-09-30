@@ -66,39 +66,71 @@ public static class LocalAdminAuth
     }
 }
 
-/// <summary>Locks a client out for a few minutes after repeated failed logins.</summary>
+/// <summary>
+/// Slows down password guessing: a client IP is locked for 5 minutes after 5 failures, and a username for 15 minutes
+/// after 10 failures from anywhere (so switching IPs does not help). Stale entries are dropped so memory stays bounded.
+/// </summary>
 public sealed class LoginThrottle(TimeProvider time)
 {
-    private const int MaxFailures = 5;
-    private static readonly TimeSpan LockDuration = TimeSpan.FromMinutes(5);
-    private readonly ConcurrentDictionary<string, (int Failures, DateTimeOffset LockedUntil)> _state = new();
+    private sealed record Rule(int MaxFailures, TimeSpan LockDuration);
 
-    public TimeSpan? LockedFor(string client)
+    private static readonly Rule ClientRule = new(5, TimeSpan.FromMinutes(5));
+    private static readonly Rule UserRule = new(10, TimeSpan.FromMinutes(15));
+    private static readonly TimeSpan ForgetAfter = TimeSpan.FromHours(1);
+    private const int PruneAbove = 1000;
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (int Failures, DateTimeOffset LockedUntil, DateTimeOffset LastFailure)> _state = new();
+
+    public TimeSpan? LockedFor(string client, string? username = null)
     {
-        if (_state.TryGetValue(client, out var entry) && entry.LockedUntil > time.GetUtcNow())
-        {
-            return entry.LockedUntil - time.GetUtcNow();
-        }
-
-        return null;
+        var now = time.GetUtcNow();
+        var until = new[] { ClientKey(client), UserKey(username) }
+            .Where(key => key is not null && _state.TryGetValue(key, out var entry) && entry.LockedUntil > now)
+            .Select(key => _state[key!].LockedUntil)
+            .DefaultIfEmpty(DateTimeOffset.MinValue)
+            .Max();
+        return until > now ? until - now : null;
     }
 
-    public void RecordFailure(string client)
+    public void RecordFailure(string client, string? username = null)
     {
+        Record(ClientKey(client), ClientRule);
+        if (UserKey(username) is { } userKey) Record(userKey, UserRule);
+        if (_state.Count > PruneAbove) Prune();
+    }
+
+    public void Reset(string client, string? username = null)
+    {
+        _state.TryRemove(ClientKey(client), out _);
+        if (UserKey(username) is { } userKey) _state.TryRemove(userKey, out _);
+    }
+
+    private void Record(string key, Rule rule)
+    {
+        var now = time.GetUtcNow();
         _state.AddOrUpdate(
-            client,
-            _ => (1, DateTimeOffset.MinValue),
+            key,
+            _ => (1, DateTimeOffset.MinValue, now),
             (_, entry) =>
             {
-                if (entry.LockedUntil > time.GetUtcNow())
-                {
-                    return entry;
-                }
-
-                var failures = entry.Failures + 1;
-                return failures >= MaxFailures ? (0, time.GetUtcNow() + LockDuration) : (failures, DateTimeOffset.MinValue);
+                if (entry.LockedUntil > now) return entry;
+                // Failures long ago do not count towards a new lock.
+                var failures = (now - entry.LastFailure > ForgetAfter ? 0 : entry.Failures) + 1;
+                return failures >= rule.MaxFailures ? (0, now + rule.LockDuration, now) : (failures, DateTimeOffset.MinValue, now);
             });
     }
 
-    public void Reset(string client) => _state.TryRemove(client, out _);
+    private void Prune()
+    {
+        var now = time.GetUtcNow();
+        foreach (var (key, entry) in _state)
+        {
+            if (entry.LockedUntil <= now && now - entry.LastFailure > ForgetAfter) _state.TryRemove(key, out _);
+        }
+    }
+
+    private static string ClientKey(string client) => "ip:" + client;
+
+    private static string? UserKey(string? username) =>
+        string.IsNullOrWhiteSpace(username) ? null : "user:" + username.Trim().ToLowerInvariant();
 }
