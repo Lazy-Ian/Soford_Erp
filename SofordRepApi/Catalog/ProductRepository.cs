@@ -3,18 +3,22 @@ public sealed class SkuConflictException(string sku) : Exception($"SKU '{sku}' �
     public string Sku { get; } = sku;
 }
 
-/// <summary>JSON-file product store. Every read returns fresh copies, so callers never share mutable state.</summary>
+/// <summary>
+/// JSON-file product store, kept in memory after the first read (the file is tens of MB once Alibaba descriptions
+/// are imported). Every read returns fresh copies, so callers never share mutable state.
+/// </summary>
 public sealed class ProductRepository(AppPaths paths, TimeProvider time)
 {
     private readonly string _file = paths.File("products.json");
     private readonly SemaphoreSlim _lock = new(1, 1);
+    private List<ProductRecord>? _cache;
 
     public async Task<List<ProductRecord>> GetAllAsync()
     {
         await _lock.WaitAsync();
         try
         {
-            return await ReadUnsafeAsync();
+            return (await ReadUnsafeAsync()).Select(x => x.Copy()).ToList();
         }
         finally
         {
@@ -37,7 +41,8 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
         product.CreatedAt = time.GetUtcNow();
         product.UpdatedAt = product.CreatedAt;
         product.ContentUpdatedAt ??= product.CreatedAt;
-        all.Add(product);
+        // Store a copy: the caller keeps its instance, and the cache must not change behind the lock.
+        all.Add(product.Copy());
         return product;
     });
 
@@ -74,25 +79,55 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
                 product.UpdatedAt = time.GetUtcNow();
             }
 
-            return changed.Select(x => x.Clone()).ToList();
+            return changed.Select(x => x.Copy()).ToList();
         });
     }
 
-    /// <summary>Upserts imported rows by SKU. Existing products keep their identity and Alibaba state.</summary>
-    public Task<(int Created, int Updated)> ImportAsync(IEnumerable<ImportRow> rows, Action<ProductRecord> afterApply) => WriteAsync(all =>
+    /// <summary>
+    /// Upserts imported rows: by Alibaba product ID when the row has one (store SKUs are often not unique on Alibaba),
+    /// otherwise by SKU. Existing products keep their identity and Alibaba state.
+    /// </summary>
+    /// <param name="warnings">Receives rows that were skipped because their Alibaba ID is unknown here.</param>
+    /// <param name="canEdit">Existing products the importing user may change; others are skipped with a warning.</param>
+    /// <param name="actor">Recorded as creator/editor.</param>
+    public Task<(int Created, int Updated)> ImportAsync(IEnumerable<ImportRow> rows, Action<ProductRecord> afterApply, List<string>? warnings = null,
+        Func<ProductRecord, bool>? canEdit = null, string? actor = null) => WriteAsync(all =>
     {
         var created = 0;
         var updated = 0;
         var bySku = all.Where(x => x.Sku.Length > 0).GroupBy(x => x.Sku, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
+        var byRemoteId = all.Where(x => !string.IsNullOrWhiteSpace(x.RemoteProductId)).GroupBy(x => x.RemoteProductId!)
+            .ToDictionary(x => x.Key, x => x.First());
         var now = time.GetUtcNow();
         foreach (var row in rows)
         {
             var draft = row.Draft;
             var sku = draft.Sku?.Trim() ?? "";
-            if (bySku.TryGetValue(sku, out var existing))
+            ProductRecord? existing;
+            if (row.RemoteProductId is { } remoteId)
+            {
+                if (!byRemoteId.TryGetValue(remoteId, out existing))
+                {
+                    warnings?.Add($"第 {row.RowNumber} 行：本系统没有 Alibaba 商品 ID 为 {remoteId} 的商品，已跳过。请先「从 Alibaba 导入」。");
+                    continue;
+                }
+            }
+            else
+            {
+                bySku.TryGetValue(sku, out existing);
+            }
+
+            if (existing is not null && canEdit is not null && !canEdit(existing))
+            {
+                warnings?.Add($"第 {row.RowNumber} 行：商品 {existing.Sku} 不属于你负责的账号，已跳过。");
+                continue;
+            }
+
+            if (existing is not null)
             {
                 var before = existing.ContentSignature();
+                existing.UpdatedBy = actor ?? existing.UpdatedBy;
                 existing.ApplyImportedFields(draft, row.Present);
                 afterApply(existing);
                 existing.UpdatedAt = now;
@@ -102,7 +137,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
                 continue;
             }
 
-            var product = new ProductRecord { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now, ContentUpdatedAt = now };
+            var product = new ProductRecord { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now, ContentUpdatedAt = now, CreatedBy = actor, UpdatedBy = actor };
             product.ApplyDraft(draft);
             afterApply(product);
             all.Add(product);
@@ -140,6 +175,8 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
                 existing.RemoteStatus = incoming.RemoteStatus;
                 existing.PublishState = incoming.PublishState;
                 existing.RemoteStatusMessage = incoming.RemoteStatusMessage;
+                // Only a fact about the listing; RemoteModifiedAt stays the version the local content is based on.
+                existing.RemoteSkuCount = incoming.RemoteSkuCount;
                 existing.LastSyncedAt = now;
                 existing.UpdatedAt = now;
                 continue;
@@ -156,12 +193,40 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
             incoming.ContentUpdatedAt = now;
             incoming.PublishedContentAt = now;
             onCreated(incoming);
-            all.Add(incoming);
+            all.Add(incoming.Copy());
             created++;
         }
 
         return (created, linked, refreshed);
     });
+
+    /// <summary>
+    /// Marks linked products whose listing no longer appears on Alibaba. Listings still in review (search may not
+    /// return them) and anything touched after the snapshot are left alone.
+    /// </summary>
+    public Task<int> MarkMissingAsync(IReadOnlySet<string> seenRemoteIds, IReadOnlySet<string> coveredOwners, DateTimeOffset snapshotAt) => WriteAsync(all =>
+    {
+        var now = time.GetUtcNow();
+        var marked = 0;
+        foreach (var product in all.Where(x => !string.IsNullOrWhiteSpace(x.RemoteProductId) && !seenRemoteIds.Contains(x.RemoteProductId!)))
+        {
+            if (product.OwnerAliId is null || !coveredOwners.Contains(product.OwnerAliId)) continue;
+            if (product.PublishState is PublishState.Publishing or PublishState.Pending) continue;
+            if (product.LastPublishedAt > snapshotAt.AddDays(-7) || product.LastSyncedAt > snapshotAt) continue;
+            if (product.RemoteStatus == RemoteMissingStatus) continue;
+
+            product.RemoteStatus = RemoteMissingStatus;
+            product.PublishState = PublishState.Offline;
+            product.RemoteStatusMessage = "Alibaba 上已找不到该商品（可能已被删除）。如确认已删除，可在本系统中删除。";
+            product.LastSyncedAt = now;
+            product.UpdatedAt = now;
+            marked++;
+        }
+
+        return marked;
+    });
+
+    public const string RemoteMissingStatus = "missing";
 
     public Task<int> DeleteManyAsync(IEnumerable<Guid> ids)
     {
@@ -196,9 +261,18 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
         try
         {
             var all = await ReadUnsafeAsync();
-            var result = change(all);
-            await JsonFile.WriteAtomicAsync(_file, all);
-            return result is ProductRecord product ? (T)(object)product.Clone() : result;
+            try
+            {
+                var result = change(all);
+                await JsonFile.WriteAtomicAsync(_file, all);
+                return result is ProductRecord product ? (T)(object)product.Copy() : result;
+            }
+            catch
+            {
+                // The change may have been applied in memory only; reload from disk next time.
+                _cache = null;
+                throw;
+            }
         }
         finally
         {
@@ -208,12 +282,14 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
 
     private async Task<List<ProductRecord>> ReadUnsafeAsync()
     {
+        if (_cache is not null) return _cache;
+
         var items = await JsonFile.ReadAsync<List<ProductRecord>>(_file) ?? [];
         foreach (var item in items)
         {
             item.MigrateLegacyFields();
         }
 
-        return items;
+        return _cache = items;
     }
 }

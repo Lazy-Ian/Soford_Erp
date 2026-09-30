@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
-import { Check, Pencil, RefreshCw, Star, Unplug, Users } from 'lucide-react'
+import { Check, ListPlus, Pencil, RefreshCw, Star, Unplug, Users } from 'lucide-react'
 import { api, errorText, post, type AlibabaAccount } from '../api'
-import { Pill, Spinner } from '../components/ui'
+import { Modal, Pill, Spinner } from '../components/ui'
 import { useApp } from '../context'
 import { useInitialLoad } from '../hooks'
 import { formatDate } from '../format'
@@ -13,6 +13,7 @@ export function AccountsCard({ reloadKey }: { reloadKey: number }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
+  const [bulkOpen, setBulkOpen] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -52,9 +53,15 @@ export function AccountsCard({ reloadKey }: { reloadKey: number }) {
       <div className="card-head">
         <div>
           <strong>账号管理</strong>
-          <span>店铺的主账号和子账号。商品按负责账号区分；用哪个账号授权，就能以哪个账号的身份发布和更新商品。</span>
+          <span>
+            店铺的主账号和子账号。商品按负责账号区分；用哪个账号授权，就能以哪个账号的身份发布和更新商品。
+            默认账号用于「从 Alibaba 导入」和操作未授权账号的商品，应设为主账号。
+          </span>
         </div>
-        <Users size={18} className="muted" />
+        <div className="actions">
+          {!!accounts?.length && <button type="button" onClick={() => setBulkOpen(true)}><ListPlus size={15} /> 批量改名</button>}
+          <Users size={18} className="muted" />
+        </div>
       </div>
 
       {accounts === null && <div className="empty small"><Spinner size={20} /></div>}
@@ -110,7 +117,11 @@ export function AccountsCard({ reloadKey }: { reloadKey: number }) {
                 </select>
               )}
               {account.hasToken && !account.isDefault && (
-                <button type="button" onClick={() => void update(account, { isDefault: true }, `「${account.name}」已设为默认账号。`)} disabled={busy !== null}>
+                <button type="button" onClick={() => confirm({
+                  title: '设为默认账号',
+                  message: `「${account.name}」将用于「从 Alibaba 导入」，以及操作未授权账号负责的商品。子账号通常只能看到和修改自己的商品，所以默认账号应是主账号。确定吗？`,
+                  onConfirm: () => void update(account, { isDefault: true }, `「${account.name}」已设为默认账号。`),
+                })} disabled={busy !== null}>
                   <Star size={15} /> 设为默认
                 </button>
               )}
@@ -139,10 +150,74 @@ export function AccountsCard({ reloadKey }: { reloadKey: number }) {
         ))}
       </div>
 
+      {bulkOpen && accounts && (
+        <BulkRename accounts={accounts} onClose={() => setBulkOpen(false)} onDone={async () => {
+          setBulkOpen(false)
+          await load()
+          await refreshAlibaba()
+        }} />
+      )}
+
       <p className="muted small-note">
         授权子账号：点上方「授权 Alibaba 店铺」，在 Alibaba 登录页换成该子账号登录，完成后粘贴回调链接。系统会根据账号 ID 自动把它和已导入的商品对应起来；
         对应不上时，可在已授权账号上用「合并账号 ID」手动关联。
       </p>
     </section>
+  )
+}
+
+/** "ID,名称" per line, as copied from the seller backend's sub-account list or a spreadsheet. */
+function parseNames(text: string) {
+  return text.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [id, ...rest] = line.split(/[,，\t]/)
+      return { id: id.trim(), name: rest.join(' ').trim() }
+    })
+}
+
+function BulkRename({ accounts, onClose, onDone }: { accounts: AlibabaAccount[]; onClose: () => void; onDone: () => Promise<void> }) {
+  const { notify } = useApp()
+  const [text, setText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const rows = parseNames(text).map((row) => ({ ...row, account: accounts.find((a) => a.ownerAliIds.includes(row.id)) }))
+  const ready = rows.filter((row) => row.account && row.name)
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      for (const row of ready) {
+        await post(`/api/integrations/alibaba/accounts/${row.account!.id}`, { name: row.name }, 'PUT')
+      }
+      notify('success', `已更新 ${ready.length} 个账号的名称。`)
+      await onDone()
+    } catch (err) {
+      notify('error', errorText(err, '批量改名失败'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="批量改名" subtitle="每行一个：账号 ID,名称。可以从 Alibaba 卖家后台的子账号列表或 Excel 复制。" onClose={onClose}
+      footer={<>
+        <button type="button" onClick={onClose}>取消</button>
+        <button type="button" className="primary" disabled={!ready.length || saving} onClick={() => void save()}>
+          {saving ? <Spinner /> : <Check size={16} />} 保存 {ready.length} 个
+        </button>
+      </>}>
+      <textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} placeholder={accounts.filter((a) => a.ownerAliIds.length).slice(0, 2).map((a) => `${a.ownerAliIds[0]},张三`).join('\n')} />
+      {rows.length > 0 && (
+        <ul className="issues">
+          {rows.map((row, index) => (
+            <li key={index} className={row.account && row.name ? 'info' : 'warning'}>
+              {row.id} → {row.name || '（缺少名称）'}
+              {row.account ? `（当前：${row.account.name}）` : '（没有这个账号 ID，将忽略）'}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   )
 }

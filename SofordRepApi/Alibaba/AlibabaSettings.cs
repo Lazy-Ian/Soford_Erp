@@ -64,7 +64,6 @@ public sealed record AlibabaSettings(
     [
         new("auth.token.create", "auth", "/auth/token/create", false, "用授权码换取 access_token"),
         new("auth.token.refresh", "auth", "/auth/token/refresh", false, "刷新 access_token"),
-        new("member.subAccounts", "account", "/alibaba/member/sub/account/info/get", true, "查询主账号下的子账号（姓名、登录名、账号 ID）"),
         new("category.get", "catalog", "/alibaba/icbu/category/get/v2", true, "查询类目信息"),
         new("category.attributes", "catalog", "/alibaba/icbu/category/attribute/get/v2", true, "查询类目属性"),
         new("category.idMapping", "catalog", "/alibaba/icbu/category/id/mapping", true, "类目 ID 映射"),

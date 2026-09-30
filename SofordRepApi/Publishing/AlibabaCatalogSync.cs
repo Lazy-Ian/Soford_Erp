@@ -1,10 +1,10 @@
 using System.Globalization;
 using System.Text.Json;
 
-public sealed record PullResult(int Total, int Created, int Linked, int Refreshed, int Pages, List<string> Warnings);
+public sealed record PullResult(int Total, int Created, int Linked, int Refreshed, int Pages, List<string> Warnings, int Missing = 0);
 
 /// <summary>Brings listings that already exist on Alibaba into the local catalog so they can be managed here.</summary>
-public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository products, ProductQualityService quality, TimeProvider time)
+public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository products, ProductQualityService quality, AlibabaTokenService tokens, TimeProvider time)
 {
     public const int PageSize = 20;
     private const int MaxPages = 100;
@@ -60,7 +60,19 @@ public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository 
         var lookup = await quality.LoadCategoryLookupAsync();
         var (created, linked, refreshed) = await products.MergeRemoteAsync(remote, p => ProductQualityService.Apply(p, lookup(p.CategoryId)), snapshotAt,
             ambiguous.Select(x => x.RemoteProductId!).ToHashSet());
-        return (new PullResult(remote.Count, created, linked, refreshed, pages, warnings), null);
+
+        // Only a complete read can tell that a listing is gone, and only for accounts this token actually sees:
+        // a sub-account's token lists its own listings only.
+        var missing = 0;
+        if (warnings.Count == 0 && pages >= totalPages)
+        {
+            var owners = remote.Select(x => x.OwnerAliId).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).ToHashSet();
+            missing = await products.MarkMissingAsync(remote.Select(x => x.RemoteProductId!).ToHashSet(), owners, snapshotAt);
+        }
+
+        // Group products by the account that owns them, even for accounts nobody has authorized yet.
+        await tokens.EnsureOwnerAccountsAsync((await products.GetAllAsync()).Select(x => x.OwnerAliId));
+        return (new PullResult(remote.Count, created, linked, refreshed, pages, warnings, missing), null);
     }
 
     /// <summary>Maps one search/v2 product_info entry to a local product. Returns null when it has no product id.</summary>
@@ -73,7 +85,10 @@ public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository 
         var category = Child(item, "category_info");
         var trade = Child(item, "trade_info");
         var logistics = Child(item, "logistics_info");
-        var skus = item.TryGetProperty("sku_info", out var skuList) && skuList.ValueKind == JsonValueKind.Array ? skuList : default;
+        // search/v2 puts sku_info next to trade_info; product.get puts it inside trade_info.
+        var skus = item.TryGetProperty("sku_info", out var skuList) && skuList.ValueKind == JsonValueKind.Array ? skuList
+            : Child(item, "trade_info") is { ValueKind: JsonValueKind.Object } tradeNode && tradeNode.TryGetProperty("sku_info", out var nested) && nested.ValueKind == JsonValueKind.Array ? nested
+            : default;
         var firstSkuCode = skus.ValueKind == JsonValueKind.Array
             ? skus.EnumerateArray().Select(x => AlibabaResponseParser.Text(x, "sku_code")).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))
             : null;
@@ -103,6 +118,9 @@ public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository 
             RemoteProductId = remoteId,
             OwnerAliId = AlibabaResponseParser.Text(basic, "owner_ali_id"),
             RemoteStatus = AlibabaResponseParser.Text(basic, "status")?.ToLowerInvariant(),
+            RemoteModifiedAt = Timestamp(AlibabaResponseParser.ReadLong(basic, "last_modified_timestamp")),
+            RemoteSkuCount = skus.ValueKind == JsonValueKind.Array ? skus.GetArrayLength() : 0,
+            ContentRefreshedAt = now,
             LastSyncedAt = now
         };
 
@@ -133,11 +151,19 @@ public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository 
             product.Stock = (int)skus.EnumerateArray().Sum(x => AlibabaResponseParser.ReadLong(x, "inventory"));
         }
 
-        var (state, label) = ProductOperations.MapStatus(product.RemoteStatus ?? "", PublishState.Pending);
+        var (state, label) = ProductOperations.MapRemote(product.RemoteStatus ?? "", AlibabaResponseParser.Text(basic, "audit_status"), PublishState.Pending);
         product.PublishState = state;
         product.RemoteStatusMessage = $"从 Alibaba 导入：{label}";
         return product;
     }
+
+    /// <summary>Alibaba timestamps come in milliseconds, occasionally seconds; 0 means not reported.</summary>
+    public static DateTimeOffset? Timestamp(long value) => value switch
+    {
+        <= 0 => null,
+        < 100_000_000_000 => DateTimeOffset.FromUnixTimeSeconds(value),
+        _ => DateTimeOffset.FromUnixTimeMilliseconds(value)
+    };
 
     private static JsonElement Child(JsonElement node, string name) =>
         node.ValueKind == JsonValueKind.Object && node.TryGetProperty(name, out var child) ? child : default;
@@ -156,5 +182,6 @@ public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository 
     private static string[] SplitKeywords(string? value) =>
         string.IsNullOrWhiteSpace(value)
             ? []
-            : value.Split([',', ';', '，', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(10).ToArray();
+            // Alibaba returns keywords one per line; sheets and older data use commas or semicolons.
+            : value.Split(['\n', '\r', ',', ';', '，', '；'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(10).ToArray();
 }

@@ -21,7 +21,8 @@ export function Modal({ title, subtitle, onClose, children, footer, wide }: {
   wide?: boolean
 }) {
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && onClose()
+    // Escape also ends a Chinese IME composition; that must not close the dialog.
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && !event.isComposing && onClose()
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])

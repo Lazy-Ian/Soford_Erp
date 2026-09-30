@@ -29,6 +29,7 @@ public sealed partial class ProductQualityService(CategoryAttributeService categ
         var issues = new List<QualityIssue>();
         void Blocker(string field, string message) => issues.Add(new(QualitySeverity.Blocker, field, message));
         void Warning(string field, string message) => issues.Add(new(QualitySeverity.Warning, field, message));
+        void Note(string field, string message) => issues.Add(new(QualitySeverity.Info, field, message));
 
         if (string.IsNullOrWhiteSpace(product.Sku)) Blocker("sku", "SKU 不能为空。");
 
@@ -37,7 +38,11 @@ public sealed partial class ProductQualityService(CategoryAttributeService categ
         else if (product.Title.Length < 25) Warning("title", "标题偏短，建议包含材质、用途、型号或核心卖点。");
         if (NonAscii().IsMatch(product.Title)) Warning("title", "标题含非英文字符，Alibaba 会自动翻译，建议直接使用英文。");
 
-        if (string.IsNullOrWhiteSpace(product.Description)) Blocker("description", "商品描述不能为空。");
+        // Listings built with the seller backend's detail editor have no description in the API at all; for them an
+        // empty local description means "not available here", and updates leave the Alibaba detail page untouched.
+        if (string.IsNullOrWhiteSpace(product.Description) && !string.IsNullOrWhiteSpace(product.RemoteProductId))
+            Note("description", "Alibaba 接口没有返回这个商品的描述（通常是在卖家后台用详情编辑器制作的），更新时不会修改线上描述。");
+        else if (string.IsNullOrWhiteSpace(product.Description)) Blocker("description", "商品描述不能为空。");
         else if (product.Description.Length < 50) Warning("description", "描述过短，建议补充功能、规格、售后等信息。");
 
         if (string.IsNullOrWhiteSpace(product.CategoryId)) Blocker("categoryId", "缺少 Alibaba 类目 ID，可使用「预测类目」自动填写。");

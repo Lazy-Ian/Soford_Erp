@@ -139,6 +139,16 @@ public sealed class ProductOperations(
         // New listings are owned by the account that creates them, so the chosen account matters here.
         var accountId = await AccountForAsync(product);
         var attemptAt = time.GetUtcNow();
+        if (isUpdate && await CheckSafeToUpdateAsync(product, accountId) is { } refusal)
+        {
+            await products.UpdateAsync(productId, p =>
+            {
+                p.PublishState = RestorableState(previousState);
+                p.RemoteStatusMessage = $"未更新：{refusal}";
+            });
+            return new(productId, product.Sku, false, refusal, product.RemoteProductId, action);
+        }
+
         if (!isUpdate)
         {
             await products.UpdateAsync(productId, p => p.CreateAttemptedAt = attemptAt);
@@ -190,6 +200,8 @@ public sealed class ProductOperations(
             // Edits saved while this call was in flight keep a newer ContentUpdatedAt and stay flagged as unpublished.
             p.PublishedContentAt = sentContent;
             p.CreateAttemptedAt = null;
+            // Our own write is now the version on Alibaba; later edits elsewhere will carry a newer timestamp.
+            p.RemoteModifiedAt = time.GetUtcNow();
         });
         progress.Committed = true;
         progress.RemoteId = remoteId;
@@ -197,6 +209,78 @@ public sealed class ProductOperations(
         var status = await RefreshStatusCoreAsync(productId);
         var message = (isUpdate ? "更新成功" : "发布成功") + $"，Alibaba 商品 ID {remoteId}" + (status.Success ? $"，当前状态：{status.Message}" : "");
         return new(productId, product.Sku, true, message, remoteId, action);
+    }
+
+    /// <summary>
+    /// An update replaces the whole listing, so refuse it when that would destroy something: variants this system
+    /// cannot represent, or edits made on Alibaba after the local copy was taken. Returns the reason, or null if safe.
+    /// </summary>
+    private async Task<string?> CheckSafeToUpdateAsync(ProductRecord product, Guid? accountId)
+    {
+        var (remote, result) = await ReadRemoteAsync(product, accountId);
+        if (remote is null) return $"无法读取 Alibaba 上的当前内容，为避免覆盖已停止更新：{AlibabaErrors.Explain(result)}";
+
+        if (remote.RemoteSkuCount > 1)
+        {
+            return $"该商品在 Alibaba 上有 {remote.RemoteSkuCount} 个规格，本系统只维护单一价格和库存，整体更新会破坏规格。请在 Alibaba 后台修改，价格可用「同步价格」以外的方式调整。";
+        }
+
+        // The local content is based on the version we copied or wrote; the import time stands in for older records.
+        var baseline = product.RemoteModifiedAt ?? product.PublishedContentAt;
+        if (remote.RemoteModifiedAt is { } changedAt && (baseline is null || changedAt > baseline.Value.Add(ClockTolerance)))
+        {
+            return $"Alibaba 上的商品在 {changedAt.ToOffset(TimeSpan.FromHours(8)):yyyy-MM-dd HH:mm} 被修改过，比本系统的副本新。请先「从 Alibaba 刷新」取回最新内容，再修改和发布。";
+        }
+
+        return null;
+    }
+
+    // Alibaba's review may touch the timestamp right after our own write.
+    private static readonly TimeSpan ClockTolerance = TimeSpan.FromMinutes(2);
+
+    /// <summary>Reads the listing with product.get and maps it like an imported one.</summary>
+    private async Task<(ProductRecord? Remote, AlibabaApiResult Result)> ReadRemoteAsync(ProductRecord product, Guid? accountId)
+    {
+        var result = await alibaba.CallAsync("product.get", new { product_id = product.RemoteProductId }, accountId: accountId);
+        if (!result.Success || AlibabaResponseParser.Find(result.Json!.Value, "product_info") is not { ValueKind: JsonValueKind.Object } info)
+        {
+            return (null, result);
+        }
+
+        return (AlibabaCatalogSync.FromRemote(info, time.GetUtcNow()), result);
+    }
+
+    /// <summary>
+    /// Replaces the local content with the listing on Alibaba. Local edits that were never published are kept
+    /// (the product is skipped) unless <paramref name="discardLocalChanges"/> is set.
+    /// </summary>
+    public async Task<OperationItemResult> RefreshContentAsync(Guid productId, bool discardLocalChanges)
+    {
+        using var _ = await locks.AcquireAsync(productId);
+        var (product, error) = await LoadPublishedAsync(productId);
+        if (product is null) return error!;
+        if (product.HasUnpublishedChanges && !discardLocalChanges)
+        {
+            return new(productId, product.Sku, false, "有未发布的本地修改，已跳过。要放弃本地修改，请用「放弃修改并刷新」。", product.RemoteProductId, "refresh");
+        }
+
+        var (remote, result) = await ReadRemoteAsync(product, await AccountForAsync(product));
+        if (remote is null) return new(productId, product.Sku, false, AlibabaErrors.Explain(result), product.RemoteProductId, "refresh");
+
+        var lookup = await quality.LoadCategoryLookupAsync();
+        var now = time.GetUtcNow();
+        await products.UpdateAsync(productId, p =>
+        {
+            p.ApplyRemoteContent(remote);
+            p.RemoteStatusMessage = remote.RemoteStatusMessage?.Replace("从 Alibaba 导入", "已从 Alibaba 刷新");
+            p.ContentRefreshedAt = now;
+            p.ContentUpdatedAt = now;
+            p.PublishedContentAt = now;
+            p.LastSyncedAt = now;
+            ProductQualityService.Apply(p, lookup(p.CategoryId));
+        });
+        var variants = remote.RemoteSkuCount > 1 ? $"，有 {remote.RemoteSkuCount} 个规格（不能在本系统整体更新）" : "";
+        return new(productId, product.Sku, true, $"已取回 Alibaba 最新内容{variants}", product.RemoteProductId, "refresh");
     }
 
     private const int MaxLookupPages = 15;
@@ -258,15 +342,33 @@ public sealed class ProductOperations(
         var (product, error) = await LoadPublishedAsync(productId);
         if (product is null) return error!;
 
-        var result = await alibaba.CallAsync("product.status", ListingMapper.BuildStatusPayload(product), accountId: await AccountForAsync(product));
-        if (!result.Success)
+        var accountId = await AccountForAsync(product);
+        var result = await alibaba.CallAsync("product.status", ListingMapper.BuildStatusPayload(product), accountId: accountId);
+        string status;
+        string? description;
+        PublishState state;
+        string label;
+        if (result.Success)
         {
-            return new(productId, product.Sku, false, AlibabaErrors.Explain(result), product.RemoteProductId, "status");
+            status = AlibabaResponseParser.ScalarText(AlibabaResponseParser.Find(result.Json!.Value, "status"))?.ToLowerInvariant() ?? "";
+            description = AlibabaResponseParser.ScalarText(AlibabaResponseParser.Find(result.Json!.Value, "status_desc"));
+            (state, label) = MapStatus(status, product.PublishState);
+        }
+        else
+        {
+            // status/get/v2 only knows listings submitted through the API ("Product not found." for everything created
+            // in the seller backend), so fall back to the listing itself: its status and audit_status.
+            var (remote, detail) = await ReadRemoteAsync(product, accountId);
+            if (remote is null)
+            {
+                return new(productId, product.Sku, false, AlibabaErrors.Explain(detail.Success ? result : detail), product.RemoteProductId, "status");
+            }
+
+            status = remote.RemoteStatus ?? "";
+            description = null;
+            (state, label) = (remote.PublishState, remote.RemoteStatusMessage?.Replace("从 Alibaba 导入：", "") ?? "");
         }
 
-        var status = AlibabaResponseParser.ScalarText(AlibabaResponseParser.Find(result.Json!.Value, "status"))?.ToLowerInvariant() ?? "";
-        var description = AlibabaResponseParser.ScalarText(AlibabaResponseParser.Find(result.Json!.Value, "status_desc"));
-        var (state, label) = MapStatus(status, product.PublishState);
         await products.UpdateAsync(productId, p =>
         {
             p.RemoteStatus = status;
@@ -422,6 +524,15 @@ public sealed class ProductOperations(
         return new(product.Id, product.Sku, true, successMessage, product.RemoteProductId, action);
     }
 
+    /// <summary>State of a listing read from product.get / product.search: a rejected audit wins over online/offline.</summary>
+    public static (PublishState State, string Label) MapRemote(string status, string? auditStatus, PublishState current) =>
+        auditStatus?.ToLowerInvariant() switch
+        {
+            "rejected" or "failed" => (PublishState.Failed, "审核未通过"),
+            "auditing" or "pending" or "wait_audit" => (PublishState.Pending, "审核中"),
+            _ => MapStatus(status, current)
+        };
+
     public static (PublishState State, string Label) MapStatus(string status, PublishState current) => status switch
     {
         "online" => (PublishState.Online, "已上架"),
@@ -492,6 +603,9 @@ public static class AlibabaErrors
         ["InsufficientPermission"] = "应用没有该接口权限，请在 App Console 申请",
         ["InsufficientIsvPermissions"] = "应用没有该接口权限，请在 App Console 申请",
         ["NetworkError"] = "网络异常，无法连接 Alibaba",
+        ["ISP"] = "Alibaba 服务返回错误",
+        ["ISV"] = "请求参数或权限有误",
+        ["ServiceTimeout"] = "Alibaba 服务超时，请稍后重试",
         ["B_PRODUCT_PARAM_INVALID"] = "商品参数不合法",
         ["B_TITLE_NOT_FOUND"] = "缺少标题",
         ["B_PRICE_ALL_NULL"] = "价格为空",

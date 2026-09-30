@@ -22,8 +22,15 @@ public static class ListingMapper
         return payload;
     }
 
-    public static JsonObject BuildUpdatePayload(ProductRecord product) =>
-        new() { ["product_info"] = BuildProductInfo(product, product.RemoteProductId) };
+    public static JsonObject BuildUpdatePayload(ProductRecord product)
+    {
+        var info = BuildProductInfo(product, product.RemoteProductId);
+        // Most listings do not track stock locally (0); sending it would empty the stock of a live listing.
+        if (product.Stock <= 0) ((JsonObject)info["trade_info"]!).Remove("inventory");
+        // No local description means Alibaba never gave us one (detail-editor listings); keep theirs.
+        if (string.IsNullOrWhiteSpace(product.Description)) ((JsonObject)info["basic_info"]!).Remove("description");
+        return new() { ["product_info"] = info };
+    }
 
     public static JsonObject BuildInventoryPayload(ProductRecord product) => new()
     {
@@ -61,7 +68,8 @@ public static class ListingMapper
                 .Select(url => (JsonNode)new JsonObject { ["image_url"] = url }).ToArray())
         };
         if (remoteProductId is not null) basic["product_id"] = ParseRemoteId(remoteProductId, product.Sku);
-        if (product.Keywords.Length > 0) basic["keywords"] = string.Join(' ', product.Keywords);
+        // One keyword per line, the way Alibaba returns them: most keywords are phrases, so spaces cannot separate them.
+        if (product.Keywords.Length > 0) basic["keywords"] = string.Join('\n', product.Keywords);
         if (RemoteModelNumber(product) is { Length: > 0 } modelNumber) basic["model_number"] = modelNumber;
         if (product.BrandName.Length > 0) basic["brand_name"] = product.BrandName;
 

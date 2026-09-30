@@ -45,6 +45,10 @@ export type Product = ProductDraft & {
   lastPublishedAt?: string | null
   lastSyncedAt?: string | null
   hasUnpublishedChanges?: boolean
+  /** Variants on Alibaba; more than one means the listing cannot be updated from here. */
+  remoteSkuCount?: number | null
+  remoteModifiedAt?: string | null
+  contentRefreshedAt?: string | null
   qualityIssues: QualityIssue[]
   createdAt: string
   updatedAt: string
@@ -54,8 +58,11 @@ export type OperationItem = { productId: string; sku: string; success: boolean; 
 export type BatchResult = { total: number; succeeded: number; failed: number; items: OperationItem[] }
 
 export type PublishJobStatus = 'Queued' | 'Running' | 'Completed' | 'CompletedWithErrors' | 'Failed' | 'Interrupted'
+export type JobKind = 'publish' | 'status' | 'inventory' | 'price' | 'online' | 'offline' | 'predict' | 'refresh' | 'refresh-discard'
 export type PublishJob = {
   id: string
+  kind?: JobKind
+  createdByName?: string | null
   productIds: string[]
   status: PublishJobStatus
   total: number
@@ -89,6 +96,25 @@ export type AutomationStatus = {
   checked: number
   changed: number
   lastMessage?: string | null
+  lastPullAt?: string | null
+}
+
+export type SummaryItem = { id: string; sku: string; title: string; remoteProductId?: string | null; remoteStatusMessage?: string | null; image?: string | null }
+export type CatalogSummary = {
+  total: number
+  online: number
+  offline: number
+  pending: number
+  failed: number
+  needsContent: number
+  unpublishedChanges: number
+  drafts: number
+  missing: number
+  fewKeywords: number
+  failedItems: SummaryItem[]
+  missingItems: SummaryItem[]
+  expiringAccounts: { id: string; name: string; expiresAt: string }[]
+  accounts: { id: string; name: string; authorized: boolean; total: number; online: number; offline: number; pending: number; failed: number }[]
 }
 
 export type AlibabaAccount = {
@@ -110,7 +136,7 @@ export function accountOf(product: Pick<Product, 'accountId' | 'ownerAliId'>, ac
   return accounts.find((x) => x.id === product.accountId) ?? accounts.find((x) => !!product.ownerAliId && x.ownerAliIds.includes(product.ownerAliId))
 }
 
-export type PullResult = { total: number; created: number; linked: number; refreshed: number; pages: number; warnings: string[] }
+export type PullResult = { total: number; created: number; linked: number; refreshed: number; pages: number; warnings: string[]; missing: number }
 
 export type DiagnosticCheck = { key: string; title: string; status: 'ok' | 'warn' | 'fail'; message: string; fix?: string | null }
 
@@ -148,7 +174,10 @@ export type CategoryAttribute = { id: string; name: string; required: boolean; s
 export type CategoryAttributeSet = { categoryId: string; fetchedAt: string; attributes: CategoryAttribute[]; saleAttributes: CategoryAttribute[] }
 
 export type ImportResult = { created: number; updated: number; skipped: number; warnings: string[]; headers: string[]; unknownHeaders: string[] }
-export type AuthSession = { authenticated: boolean; username?: string | null }
+/** `expired` marks a session that ended while the app was open: login is shown over the page so unsaved work survives. */
+export type AuthSession = { authenticated: boolean; username?: string | null; role?: 'Admin' | 'Operator' | null; canChangePassword?: boolean; expired?: boolean }
+export type AppUser = { id: string; username: string; displayName: string; role: 'Admin' | 'Operator'; accountIds: string[]; disabled: boolean; createdAt: string }
+export type AuditEntry = { id: string; at: string; userId: string; userName: string; action: string; summary: string; count: number }
 
 export class ApiError extends Error {
   status: number

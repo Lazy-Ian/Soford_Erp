@@ -70,7 +70,7 @@ public class CatalogTests
         var info = payload["product_info"]!.AsObject();
 
         Assert.Equal(product.Title, (string?)info["basic_info"]!["title"]);
-        Assert.Equal("bluetooth speaker portable speaker waterproof speaker", (string?)info["basic_info"]!["keywords"]);
+        Assert.Equal("bluetooth speaker\nportable speaker\nwaterproof speaker", (string?)info["basic_info"]!["keywords"]);
         Assert.Equal(2, info["basic_info"]!["product_image"]!.AsArray().Count);
         Assert.Equal(201896803L, (long)info["category_info"]!["category_id"]!);
         Assert.Equal("TIERED", (string?)info["trade_info"]!["price"]!["price_type"]);

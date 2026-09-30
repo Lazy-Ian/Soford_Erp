@@ -3,7 +3,6 @@ public sealed record DiagnosticCheck(string Key, string Title, string Status, st
 /// <summary>Step-by-step connection self-check shown on the 「店铺连接」 page.</summary>
 public sealed class SystemDiagnostics(
     IConfiguration config,
-    IHostEnvironment env,
     AppPaths paths,
     AlibabaTransport transport,
     AlibabaTokenService tokens,

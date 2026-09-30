@@ -169,6 +169,8 @@ public sealed class AlibabaApiLogStore(AppPaths paths)
     private const int MaxEntries = 1000;
     private readonly string _file = paths.File("alibaba-api-logs.json");
     private readonly SemaphoreSlim _lock = new(1, 1);
+    // Kept in memory so each call only writes the file (several MB when full) instead of reading it back first.
+    private List<ApiCallLogRecord>? _cache;
 
     public async Task AppendAsync(ApiCallLogRecord log)
     {
@@ -179,7 +181,7 @@ public sealed class AlibabaApiLogStore(AppPaths paths)
             logs.Add(log);
             if (logs.Count > MaxEntries)
             {
-                logs = logs.OrderByDescending(x => x.CreatedAt).Take(MaxEntries).OrderBy(x => x.CreatedAt).ToList();
+                logs.RemoveRange(0, logs.Count - MaxEntries);
             }
 
             await JsonFile.WriteAtomicAsync(_file, logs);
@@ -205,14 +207,17 @@ public sealed class AlibabaApiLogStore(AppPaths paths)
 
     private async Task<List<ApiCallLogRecord>> ReadAsync()
     {
+        if (_cache is not null) return _cache;
         try
         {
-            return await JsonFile.ReadAsync<List<ApiCallLogRecord>>(_file) ?? [];
+            _cache = (await JsonFile.ReadAsync<List<ApiCallLogRecord>>(_file) ?? []).OrderBy(x => x.CreatedAt).ToList();
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
         {
-            // Old log format from the previous release; logs are disposable.
-            return [];
+            // Old log format from the previous release, or a damaged file; logs are disposable.
+            _cache = [];
         }
+
+        return _cache;
     }
 }

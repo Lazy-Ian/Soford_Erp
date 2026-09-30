@@ -212,13 +212,14 @@ function AutomationCard() {
       <div className="card-head">
         <div>
           <strong>自动同步</strong>
-          <span>后台定时续期 Token，并查询「审核中」商品的最新状态，无需手动点击。</span>
+          <span>后台定时续期 Token、查询「审核中」商品的状态、补全导入时缺少描述的商品，每天从 Alibaba 读取一次全部商品（新增、删除、负责账号）。</span>
         </div>
         <Pill tone={status?.enabled ? 'good' : 'neutral'}>{status?.enabled ? `每 ${status.intervalMinutes} 分钟` : '未开启'}</Pill>
       </div>
       <dl className="facts">
         <dt>上次运行</dt><dd>{formatDate(status?.lastRunAt)}</dd>
         <dt>下次运行</dt><dd>{formatDate(status?.nextRunAt)}</dd>
+        <dt>上次读取全部商品</dt><dd>{formatDate(status?.lastPullAt)}</dd>
         <dt>结果</dt><dd>{status?.lastMessage || '-'}</dd>
       </dl>
       <div className="actions left">

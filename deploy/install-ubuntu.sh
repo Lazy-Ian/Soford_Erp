@@ -57,6 +57,24 @@ if [ -n "$(sudo ls -A "$APP_ROOT/app_data" 2>/dev/null)" ]; then
     exit 1
   fi
 fi
+# Keep the running release so a failed upgrade can go back to it.
+if [ -n "$(sudo ls -A "$APP_ROOT/api" 2>/dev/null)" ]; then
+  sudo rsync -a --delete "$APP_ROOT/api/" "$APP_ROOT/api.previous/"
+  sudo rsync -a --delete "$APP_ROOT/web/" "$APP_ROOT/web.previous/"
+fi
+
+rollback() {
+  if sudo test -d "$APP_ROOT/api.previous"; then
+    echo "Rolling back to the previous release ..."
+    sudo rsync -a --delete "$APP_ROOT/api.previous/" "$APP_ROOT/api/"
+    sudo rsync -a --delete "$APP_ROOT/web.previous/" "$APP_ROOT/web/"
+  fi
+  sudo systemctl start soford-erp-api || true
+}
+
+# From here on the API is stopped: any failure (rsync, nginx -t, certbot ...) must not leave it down.
+trap 'echo "Install step failed."; rollback' ERR
+
 sudo rsync -a --delete "$RELEASE_DIR/api/" "$APP_ROOT/api/"
 sudo rsync -a --delete "$RELEASE_DIR/web/" "$APP_ROOT/web/"
 
@@ -104,6 +122,8 @@ else
   fi
 fi
 
+trap - ERR
+
 # Refuse to start with template secrets; the API would reject them anyway and crash-loop.
 needs_config=""
 # Mirror the API's own rule (LocalAdminAuth): at least 10 characters and not a known placeholder.
@@ -131,7 +151,10 @@ else
   if curl -fs -H "Host: ${DOMAIN}" http://127.0.0.1:5153/api/health >/dev/null; then
     echo "API is running."
   else
-    echo "API did not become healthy. Check: sudo journalctl -u soford-erp-api -n 50"
+    echo "API did not become healthy. Logs: sudo journalctl -u soford-erp-api -n 50"
+    trap - ERR
+    sudo systemctl stop soford-erp-api || true
+    rollback
     exit 1
   fi
   if [ -n "$needs_config" ]; then

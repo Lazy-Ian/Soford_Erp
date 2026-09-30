@@ -3,7 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 
 public sealed record LoginRequest(string Username, string Password, bool Remember);
-public sealed record AuthSessionResponse(bool Authenticated, string? Username);
+/// <param name="CanChangePassword">False for the built-in administrator, whose password lives in the server configuration.</param>
+public sealed record AuthSessionResponse(bool Authenticated, string? Username, string? Role = null, bool CanChangePassword = false);
 
 public static class LocalAdminAuth
 {

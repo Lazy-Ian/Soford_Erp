@@ -82,6 +82,16 @@ public sealed class CategoryAttributeService(AppPaths paths, TimeProvider time)
             .ToList();
     }
 
-    private async Task<Dictionary<string, CategoryAttributeSet>> ReadAsync() =>
-        await JsonFile.ReadAsync<Dictionary<string, CategoryAttributeSet>>(_file) ?? new();
+    private async Task<Dictionary<string, CategoryAttributeSet>> ReadAsync()
+    {
+        try
+        {
+            return await JsonFile.ReadAsync<Dictionary<string, CategoryAttributeSet>>(_file) ?? new();
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
+        {
+            // Only a cache of Alibaba data; it is fetched again on demand.
+            return new();
+        }
+    }
 }

@@ -123,6 +123,13 @@ public static class AlibabaResponseParser
             return (false, code, Text(root, "message") ?? Text(root, "msg"), requestId, root);
         }
 
+        // Gateway/service errors without a code, e.g. {"type":"ISP","message":"Product not found."}. Successful
+        // responses never carry a top-level "type".
+        if (Text(root, "type") is { Length: > 0 } errorType && Text(root, "message") is { Length: > 0 } errorMessage)
+        {
+            return (false, errorType, errorMessage, requestId, root);
+        }
+
         if (TryBusinessFailure(root, out var failure))
         {
             return (false, failure.Code, failure.Message, requestId, root);

@@ -65,6 +65,12 @@ export function ProductEditor({ product, saving, onClose, onSave }: {
   const [preview, setPreview] = useState<string | null>(null)
   const [newImage, setNewImage] = useState('')
   const fileInput = useRef<HTMLInputElement | null>(null)
+  const [snapshot] = useState(() => JSON.stringify([form, keywordText, attributes]))
+
+  // Escape, the backdrop and 取消 all come through here, so an accidental click never throws away edits.
+  const close = () => {
+    if (JSON.stringify([form, keywordText, attributes]) === snapshot || window.confirm('有未保存的修改，确定放弃并关闭吗？')) onClose()
+  }
 
   const set = <K extends keyof ProductDraft>(key: K, value: ProductDraft[K]) => setForm((current) => ({ ...current, [key]: value }))
   const num = (value: string) => (value.trim() === '' ? 0 : Number(value))
@@ -164,7 +170,7 @@ export function ProductEditor({ product, saving, onClose, onSave }: {
     <Modal
       title={product ? `编辑商品 ${product.sku}` : '新建商品'}
       subtitle="字段与 Alibaba 发布接口 product_info 对应。带 * 为必填。"
-      onClose={onClose}
+      onClose={close}
       wide
       footer={
         <>
@@ -174,7 +180,7 @@ export function ProductEditor({ product, saving, onClose, onSave }: {
               {busy === 'preview' ? <Spinner /> : <Code2 size={16} />} 发布报文
             </button>
           )}
-          <button type="button" onClick={onClose}>取消</button>
+          <button type="button" onClick={close}>取消</button>
           <button type="submit" form="product-form" className="primary" disabled={saving}>
             {saving ? <Spinner /> : <CheckCircle2 size={16} />} 保存
           </button>
@@ -182,6 +188,14 @@ export function ProductEditor({ product, saving, onClose, onSave }: {
       }
     >
       <form id="product-form" className="editor" onSubmit={submit}>
+        {product?.remoteSkuCount && product.remoteSkuCount > 1 ? (
+          <div className="banner warn">
+            该商品在 Alibaba 上有 {product.remoteSkuCount} 个规格。本系统只维护单一价格和库存，无法整体更新这个商品，修改请到 Alibaba 后台进行。
+          </div>
+        ) : null}
+        {product?.remoteProductId && !product.description ? (
+          <div className="banner info">Alibaba 接口不提供这个商品的描述（详情页是在卖家后台用详情编辑器做的）。描述留空时，更新不会改动线上的详情页。</div>
+        ) : null}
         <fieldset>
           <legend>基础信息</legend>
           <div className="grid four">

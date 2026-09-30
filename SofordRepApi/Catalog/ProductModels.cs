@@ -84,6 +84,18 @@ public sealed class ProductRecord
     /// <summary>ContentUpdatedAt of the version last sent to Alibaba successfully.</summary>
     public DateTimeOffset? PublishedContentAt { get; set; }
 
+    /// <summary>
+    /// Alibaba's last_modified_timestamp of the listing version the local content is based on (content copied from
+    /// Alibaba, or our own write). A newer timestamp on Alibaba means someone edited the listing elsewhere.
+    /// </summary>
+    public DateTimeOffset? RemoteModifiedAt { get; set; }
+
+    /// <summary>Variants (sku_info) on Alibaba. This system edits a single price and stock, so more than one cannot be updated safely.</summary>
+    public int? RemoteSkuCount { get; set; }
+
+    /// <summary>When the listing content was last copied from Alibaba.</summary>
+    public DateTimeOffset? ContentRefreshedAt { get; set; }
+
     /// <summary>Set while a create call is in flight or ended without a known outcome; enables the duplicate check.</summary>
     public DateTimeOffset? CreateAttemptedAt { get; set; }
 
@@ -91,6 +103,10 @@ public sealed class ProductRecord
         !string.IsNullOrWhiteSpace(RemoteProductId) && ContentUpdatedAt is not null && ContentUpdatedAt != PublishedContentAt;
 
     public List<QualityIssue> QualityIssues { get; set; } = [];
+
+    /// <summary>User id of whoever created the product here (imports from Alibaba have none).</summary>
+    public string? CreatedBy { get; set; }
+    public string? UpdatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
@@ -117,13 +133,26 @@ public sealed class ProductRecord
         LegacyDetailImageUrls = null;
         LegacyLastPublishMessage = null;
         Attributes = new Dictionary<string, string>(Attributes ?? new(), StringComparer.OrdinalIgnoreCase);
-        Keywords ??= [];
+        // Imports before keywords were split per line stored Alibaba's whole newline-separated list as one keyword.
+        Keywords = (Keywords ?? []).SelectMany(x => x.Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(10).ToArray();
         Images ??= [];
         TieredPrices ??= [];
         QualityIssues ??= [];
     }
 
-    public ProductRecord Clone() => JsonSerializer.Deserialize<ProductRecord>(JsonSerializer.Serialize(this, JsonFile.Options), JsonFile.Options)!;
+    /// <summary>Fast deep copy: strings and records are immutable, so only the collections need copying.</summary>
+    public ProductRecord Copy()
+    {
+        var copy = (ProductRecord)MemberwiseClone();
+        copy.Keywords = [.. Keywords];
+        copy.Images = [.. Images];
+        copy.Attributes = new Dictionary<string, string>(Attributes, StringComparer.OrdinalIgnoreCase);
+        copy.TieredPrices = [.. TieredPrices];
+        copy.QualityIssues = [.. QualityIssues];
+        copy.LegacyDetailImageUrls = LegacyDetailImageUrls is null ? null : [.. LegacyDetailImageUrls];
+        return copy;
+    }
 
     /// <summary>Copies editable listing fields; identity, remote state and timestamps are kept.</summary>
     public void ApplyDraft(ProductDraft draft)
@@ -201,6 +230,37 @@ public sealed class ProductRecord
         if (Has("WidthCm")) WidthCm = incoming.WidthCm;
         if (Has("HeightCm")) HeightCm = incoming.HeightCm;
         if (Has("Images", "MainImageUrl", "DetailImageUrls")) Images = incoming.Images;
+    }
+
+    /// <summary>Takes over the listing content read from Alibaba; identity, SKU, account and local timestamps are kept.</summary>
+    public void ApplyRemoteContent(ProductRecord remote)
+    {
+        Title = remote.Title;
+        Description = remote.Description;
+        Keywords = remote.Keywords;
+        ModelNumber = remote.ModelNumber;
+        Language = remote.Language;
+        Images = remote.Images;
+        CategoryId = remote.CategoryId;
+        CategoryPath = remote.CategoryPath;
+        Attributes = remote.Attributes;
+        Currency = remote.Currency;
+        Price = remote.Price;
+        TieredPrices = remote.TieredPrices;
+        MinimumOrderQuantity = remote.MinimumOrderQuantity;
+        Unit = remote.Unit;
+        Stock = remote.Stock;
+        LeadTimeDays = remote.LeadTimeDays;
+        ShippingTemplateId = remote.ShippingTemplateId;
+        WeightKg = remote.WeightKg;
+        LengthCm = remote.LengthCm;
+        WidthCm = remote.WidthCm;
+        HeightCm = remote.HeightCm;
+        OwnerAliId = remote.OwnerAliId ?? OwnerAliId;
+        RemoteStatus = remote.RemoteStatus;
+        PublishState = remote.PublishState;
+        RemoteModifiedAt = remote.RemoteModifiedAt;
+        RemoteSkuCount = remote.RemoteSkuCount;
     }
 
     /// <summary>Serialized listing content, used to tell real edits apart from no-op re-imports.</summary>

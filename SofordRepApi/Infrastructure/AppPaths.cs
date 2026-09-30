@@ -45,7 +45,9 @@ public static class JsonFile
         await using var stream = System.IO.File.OpenRead(path);
         if (stream.Length == 0)
         {
-            return default;
+            // WriteAtomicAsync never produces an empty file, so this is damage (e.g. a power cut). Treating it as
+            // "no data" would let the next write replace everything with an empty list.
+            throw new InvalidDataException($"数据文件 {Path.GetFileName(path)} 为空（可能已损坏），请从备份恢复。");
         }
 
         return await JsonSerializer.DeserializeAsync<T>(stream, Options);
@@ -56,12 +58,21 @@ public static class JsonFile
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = $"{path}.{Guid.NewGuid():N}.tmp";
-        await using (var stream = System.IO.File.Create(temp))
+        try
         {
-            await JsonSerializer.SerializeAsync(stream, value, Options);
-            await stream.FlushAsync();
-        }
+            await using (var stream = System.IO.File.Create(temp))
+            {
+                await JsonSerializer.SerializeAsync(stream, value, Options);
+                // Reach the disk before the rename, or a power cut can leave the renamed file empty.
+                stream.Flush(flushToDisk: true);
+            }
 
-        System.IO.File.Move(temp, path, overwrite: true);
+            System.IO.File.Move(temp, path, overwrite: true);
+        }
+        catch
+        {
+            try { System.IO.File.Delete(temp); } catch (IOException) { }
+            throw;
+        }
     }
 }

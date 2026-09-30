@@ -5,7 +5,8 @@ using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 
 /// <summary>Present holds the canonical fields that had a column in the sheet; only those update existing products.</summary>
-public sealed record ImportRow(int RowNumber, ProductDraft Draft, IReadOnlySet<string> Present);
+/// <param name="RemoteProductId">Alibaba product ID from the sheet; when given it identifies the product instead of the SKU.</param>
+public sealed record ImportRow(int RowNumber, ProductDraft Draft, IReadOnlySet<string> Present, string? RemoteProductId = null);
 
 public sealed record ImportParseResult(List<ImportRow> Rows, List<string> Warnings, string[] Headers, string[] UnknownHeaders, int Skipped);
 
@@ -16,6 +17,7 @@ public sealed partial class ProductImportService
     /// <summary>Canonical field → accepted header aliases. Headers are normalized (lower case, no spaces/punctuation, parentheses removed).</summary>
     public static readonly IReadOnlyDictionary<string, string[]> Fields = new Dictionary<string, string[]>
     {
+        ["RemoteProductId"] = ["remoteproductid", "alibabaproductid", "alibabaid", "alibaba商品id", "商品id", "productid"],
         ["Sku"] = ["sku", "productcode", "itemcode", "商品编码", "货号", "编码"],
         ["Title"] = ["title", "producttitle", "englishtitle", "name", "productname", "标题", "英文标题", "商品标题", "商品名称"],
         ["Description"] = ["description", "productdescription", "details", "描述", "商品描述", "详情"],
@@ -46,7 +48,8 @@ public sealed partial class ProductImportService
     /// <summary>Template columns in order, with a Chinese explanation and an example value.</summary>
     public static readonly (string Header, bool Required, string Help, string Example)[] TemplateColumns =
     [
-        ("Sku", true, "商品编码，唯一。已存在则更新", "SF-SPK-001"),
+        ("RemoteProductId", false, "已在 Alibaba 上的商品填 Alibaba 商品 ID：按它匹配并更新，SKU 可留空。导出的 CSV 自带这一列", ""),
+        ("Sku", true, "商品编码，唯一。没有 Alibaba 商品 ID 时按它匹配，已存在则更新", "SF-SPK-001"),
         ("Title", true, "英文标题，≤128 字符", "Portable Wireless Bluetooth Speaker Waterproof IPX7 Outdoor"),
         ("Description", true, "商品描述，支持 HTML", "20W stereo sound, 12h battery, IPX7 waterproof."),
         ("Keywords", false, "关键词，用 ; 分隔，最多 10 个", "bluetooth speaker;portable speaker;waterproof speaker"),
@@ -110,9 +113,9 @@ public sealed partial class ProductImportService
             else unknown.Add(headers[i]);
         }
 
-        if (!columns.ContainsKey("Sku"))
+        if (!columns.ContainsKey("Sku") && !columns.ContainsKey("RemoteProductId"))
         {
-            throw new ImportFormatException("缺少 SKU 列（表头应为 Sku 或 商品编码）。请使用系统模板。");
+            throw new ImportFormatException("缺少 SKU 列或 Alibaba 商品 ID 列（表头应为 Sku / 商品编码，或 RemoteProductId / Alibaba 商品 ID）。请使用系统模板。");
         }
 
         var present = columns.Keys.ToHashSet();
@@ -126,9 +129,10 @@ public sealed partial class ProductImportService
             string Get(string field) => columns.TryGetValue(field, out var index) && index < cells.Length ? cells[index].Trim() : "";
 
             var sku = Get("Sku");
-            if (sku.Length == 0)
+            var remoteId = Get("RemoteProductId");
+            if (sku.Length == 0 && remoteId.Length == 0)
             {
-                warnings.Add($"第 {rowNumber} 行：SKU 为空，已跳过。");
+                warnings.Add($"第 {rowNumber} 行：SKU 和 Alibaba 商品 ID 都为空，已跳过。");
                 skipped++;
                 continue;
             }
@@ -186,10 +190,10 @@ public sealed partial class ProductImportService
                 images,
                 false);
 
-            rows.Add(new ImportRow(rowNumber, draft, present));
+            rows.Add(new ImportRow(rowNumber, draft, present, remoteId.Length > 0 ? remoteId : null));
             if (rowWarnings.Count > 0)
             {
-                warnings.Add($"第 {rowNumber} 行（{sku}）：{string.Join("；", rowWarnings)}。");
+                warnings.Add($"第 {rowNumber} 行（{(sku.Length > 0 ? sku : remoteId)}）：{string.Join("；", rowWarnings)}。");
             }
         }
 

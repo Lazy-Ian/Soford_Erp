@@ -65,8 +65,9 @@ public sealed class AlibabaAccount
 }
 
 /// <summary>Stores all accounts (including their tokens) encrypted with ASP.NET Data Protection.</summary>
-public sealed class AlibabaAccountStore(AppPaths paths, IDataProtectionProvider dataProtection, TimeProvider time)
+public sealed class AlibabaAccountStore(AppPaths paths, IDataProtectionProvider dataProtection, TimeProvider time, ILogger<AlibabaAccountStore> logger)
 {
+    private readonly ILogger _logger = logger;
     private readonly string _file = paths.File("alibaba-accounts.json");
     private readonly string _legacyTokenFile = paths.File("alibaba-token.json");
     private readonly IDataProtector _protector = dataProtection.CreateProtector("SofordErp.AlibabaAccounts.v1");
@@ -123,7 +124,12 @@ public sealed class AlibabaAccountStore(AppPaths paths, IDataProtectionProvider 
         }
         catch (System.Security.Cryptography.CryptographicException)
         {
-            // Keys were rotated or lost; accounts must be authorized again.
+            // The data-protection keys were lost or replaced (e.g. a restore without app_data/data-protection-keys).
+            // Move the file aside instead of letting the next write overwrite it: with the old keys restored it
+            // can be put back, and account names and owner ids are not lost.
+            var aside = $"{_file}.unreadable-{time.GetUtcNow():yyyyMMddHHmmss}";
+            File.Move(_file, aside);
+            _logger.LogError("alibaba-accounts.json could not be decrypted and was moved to {File}; accounts must be authorized again or the old data-protection keys restored.", aside);
             return [];
         }
     }

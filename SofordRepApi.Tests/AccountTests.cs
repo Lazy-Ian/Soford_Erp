@@ -8,7 +8,7 @@ public class AccountTests
     {
         var paths = new AppPaths(Path.Combine(Path.GetTempPath(), "soford-tests", Guid.NewGuid().ToString("N")));
         var protection = new EphemeralDataProtectionProvider();
-        return (new AlibabaAccountStore(paths, protection, TimeProvider.System), paths, protection);
+        return (new AlibabaAccountStore(paths, protection, TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<AlibabaAccountStore>.Instance), paths, protection);
     }
 
     private static AlibabaTokenRecord Token(string login) => new()

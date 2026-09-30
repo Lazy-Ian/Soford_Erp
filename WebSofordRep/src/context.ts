@@ -7,10 +7,16 @@ export type AppContextValue = {
   confirm: (request: ConfirmRequest) => void
   alibaba: AlibabaStatus | null
   refreshAlibaba: () => Promise<void>
-  navigate: (tab: TabKey) => void
+  /** `filter` preselects a product list filter, e.g. navigate('products', 'Failed'). */
+  navigate: (tab: TabKey, filter?: string) => void
+  /** The signed-in person; operators only see their own accounts' products and cannot manage the store. */
+  user: { name: string; isAdmin: boolean } | null
 }
 
-export type TabKey = 'products' | 'jobs' | 'connection' | 'workbench' | 'logs'
+export type TabKey = 'overview' | 'products' | 'jobs' | 'connection' | 'workbench' | 'logs' | 'users' | 'audit'
+
+/** The hash is "#tab" or "#tab/filter". */
+export const hashFilter = () => window.location.hash.replace('#', '').split('/')[1] ?? ''
 
 export const AppContext = createContext<AppContextValue | null>(null)
 

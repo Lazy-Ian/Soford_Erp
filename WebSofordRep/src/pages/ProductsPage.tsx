@@ -4,33 +4,53 @@ import {
   Plus, RefreshCw, Rocket, Search, Tags, Trash2, Upload, Warehouse, DollarSign,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { accountOf, api, errorText, post, type AlibabaAccount, type BatchResult, type ImportResult, type Product, type ProductDraft, type PublishJob, type PublishState, type PullResult } from '../api'
+import { accountOf, api, errorText, post, UNAUTHORIZED_EVENT, type AlibabaAccount, type BatchResult, type ImportResult, type JobKind, type Product, type ProductDraft, type PublishJob, type PublishState, type PullResult } from '../api'
 import { BatchResultDialog, Modal, Pagination, Pill, Spinner } from '../components/ui'
-import { useApp } from '../context'
+import { hashFilter, useApp } from '../context'
 import { useInitialLoad } from '../hooks'
-import { downloadUrl, formatDate, formatPrice, jobStatusLabel, publishStateLabel, publishStateTone } from '../format'
+import { downloadUrl, formatDate, formatPrice, jobKindLabel, jobStatusLabel, publishStateLabel, publishStateTone } from '../format'
 import { ProductEditor } from './ProductEditor'
 
-type Filter = 'all' | 'incomplete' | 'ready' | PublishState
+type Filter = 'all' | 'incomplete' | 'ready' | 'needs-content' | 'changes' | 'missing' | 'few-keywords' | PublishState
 
 const filters: { key: Filter; label: string }[] = [
   { key: 'all', label: '全部' },
-  { key: 'incomplete', label: '待完善' },
-  { key: 'ready', label: '可发布' },
-  { key: 'Pending', label: '审核中' },
   { key: 'Online', label: '已上架' },
   { key: 'Offline', label: '已下架' },
-  { key: 'Failed', label: '发布失败' },
+  { key: 'Pending', label: '审核中' },
+  { key: 'Failed', label: '未通过/失败' },
+  { key: 'needs-content', label: '内容不完整' },
+  { key: 'changes', label: '有未发布修改' },
+  { key: 'incomplete', label: '新品待完善' },
+  { key: 'ready', label: '新品可发布' },
 ]
 
+const hasBlockers = (item: Product) => item.qualityIssues.some((x) => x.severity === 'Blocker')
+
+/** Quality checks are about publishing: for listings already on Alibaba they mean "content incomplete here", not "not ready". */
+function matchesFilter(item: Product, filter: Filter) {
+  const published = !!item.remoteProductId
+  switch (filter) {
+    case 'all': return true
+    case 'incomplete': return !published && item.localState === 'Incomplete'
+    case 'ready': return !published && item.localState === 'Ready' && item.publishState === 'NotPublished'
+    case 'needs-content': return published && hasBlockers(item)
+    case 'changes': return !!item.hasUnpublishedChanges
+    case 'missing': return item.remoteStatus === 'missing'
+    case 'few-keywords': return published && item.keywords.length < 3
+    default: return item.publishState === filter
+  }
+}
+
 export function ProductsPage() {
-  const { notify, confirm, alibaba, navigate } = useApp()
+  const { notify, confirm, alibaba, navigate, user } = useApp()
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [accounts, setAccounts] = useState<AlibabaAccount[]>([])
   const [accountFilter, setAccountFilter] = useState('all')
-  const [filter, setFilter] = useState<Filter>('all')
+  // Some filters are only reached from the overview, so they have no button of their own.
+  const [filter, setFilter] = useState<Filter>(() => (['missing', 'few-keywords'].includes(hashFilter()) || filters.some((x) => x.key === hashFilter()) ? hashFilter() as Filter : 'all'))
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -67,7 +87,8 @@ export function ProductsPage() {
     const timer = window.setTimeout(async () => {
       try {
         const next = await api<PublishJob>(`/api/catalog/publish-jobs/${job.id}`)
-        if (next.processed !== job.processed || next.status !== job.status) void load()
+        // The list is heavy: reload it once when the job ends, not on every processed item.
+        if (next.status !== job.status && !['Queued', 'Running'].includes(next.status)) void load()
         setJob(next)
       } catch (err) {
         // Keep polling after a transient failure instead of freezing the progress bar.
@@ -81,9 +102,7 @@ export function ProductsPage() {
   const filtered = useMemo(() => {
     const key = query.trim().toLowerCase()
     return products.filter((item) => {
-      if (filter === 'incomplete' && item.localState !== 'Incomplete') return false
-      if (filter === 'ready' && !(item.localState === 'Ready' && item.publishState === 'NotPublished')) return false
-      if (!['all', 'incomplete', 'ready'].includes(filter) && item.publishState !== filter) return false
+      if (!matchesFilter(item, filter)) return false
       if (accountFilter !== 'all') {
         const owner = accounts.find((a) => !!item.ownerAliId && a.ownerAliIds.includes(item.ownerAliId))
         if (accountFilter === 'none' ? owner || item.accountId : owner?.id !== accountFilter && item.accountId !== accountFilter) return false
@@ -97,18 +116,31 @@ export function ProductsPage() {
   const currentPage = Math.min(page, pages)
   const visible = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize)
   // Selection only ever covers products that are currently visible under the filter, so batch actions never hit hidden rows.
-  const selectedIds = filtered.filter((item) => selected.has(item.id)).map((item) => item.id)
-  const selectedProducts = products.filter((item) => selectedIds.includes(item.id))
+  const selectedProducts = filtered.filter((item) => selected.has(item.id))
+  const selectedIds = selectedProducts.map((item) => item.id)
   const publishedSelected = selectedProducts.filter((item) => item.remoteProductId).length
+  const stockSelected = selectedProducts.filter((item) => item.remoteProductId && item.stock > 0).length
 
-  const summary = useMemo(() => ({
-    total: products.length,
-    incomplete: products.filter((x) => x.localState === 'Incomplete').length,
-    ready: products.filter((x) => x.localState === 'Ready' && x.publishState === 'NotPublished').length,
-    pending: products.filter((x) => x.publishState === 'Pending').length,
-    online: products.filter((x) => x.publishState === 'Online').length,
-    failed: products.filter((x) => x.publishState === 'Failed').length,
-  }), [products])
+  const summary = useMemo(() => {
+    const count = (key: Filter) => products.filter((x) => matchesFilter(x, key)).length
+    return {
+      total: products.length,
+      online: count('Online'),
+      pending: count('Pending'),
+      failed: count('Failed'),
+      needsContent: count('needs-content'),
+      drafts: count('incomplete') + count('ready'),
+    }
+  }, [products])
+
+  // The list omits descriptions to stay small; the editor needs the full product.
+  const openEditor = (item: Product) =>
+    run('open', async () => setEditing(await api<Product>(`/api/catalog/products/${item.id}`)))
+
+  const applyFilter = (next: Filter) => {
+    setFilter(next)
+    setPage(1)
+  }
 
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key)
@@ -121,12 +153,43 @@ export function ProductsPage() {
     }
   }
 
-  const runBatch = (key: string, title: string, url: string) =>
-    run(key, async () => {
-      const result = await post<BatchResult>(url, { productIds: selectedIds })
-      setBatch({ title, result })
-      await load()
+  // Batch Alibaba operations run as background jobs; the progress bar below follows them.
+  const startJob = (kind: Exclude<JobKind, 'publish'>) =>
+    run(kind, async () => {
+      setJob(await post<PublishJob>(`/api/catalog/jobs/${kind}`, { productIds: selectedIds }))
     })
+
+  const refreshFromAlibaba = () => {
+    const edited = selectedProducts.filter((x) => x.remoteProductId && x.hasUnpublishedChanges).length
+    const choice = { discard: false }
+    confirm({
+      title: '从 Alibaba 刷新',
+      confirmText: '开始刷新',
+      message: (
+        <>
+          <p>用 Alibaba 上的最新内容（标题、描述、图片、属性、价格等）替换本系统中 {publishedSelected} 个商品的内容。SKU 和指定账号不变。</p>
+          <p className="muted">在 Alibaba 后台改过的商品、或导入时缺少描述的商品，更新前都应先刷新，否则发布会被拦截。</p>
+          {edited > 0 && (
+            <label className="check-line">
+              <input type="checkbox" onChange={(e) => (choice.discard = e.target.checked)} />
+              其中 {edited} 个有未发布的本地修改，默认跳过；勾选则放弃这些修改
+            </label>
+          )}
+        </>
+      ),
+      onConfirm: () => void startJob(choice.discard ? 'refresh-discard' : 'refresh'),
+    })
+  }
+
+  const confirmJob = (kind: 'inventory' | 'price' | 'predict') => {
+    const count = kind === 'predict' ? selectedIds.length : publishedSelected
+    const message = {
+      inventory: `把本系统中的库存写入 Alibaba 上 ${count} 个已发布商品？本地库存为 0 的商品会跳过。`,
+      price: `把本系统中的价格（含阶梯价）写入 Alibaba 上 ${count} 个已发布商品？会直接改动线上价格。`,
+      predict: `为 ${count} 个商品请求 Alibaba 推荐类目，并用推荐结果替换本地的类目 ID？`,
+    }[kind]
+    confirm({ title: jobKindLabel[kind], message, confirmText: '开始', onConfirm: () => void startJob(kind) })
+  }
 
   const importFile = (file: File) =>
     run('import', async () => {
@@ -184,7 +247,7 @@ export function ProductsPage() {
               <span className="muted">新发布的商品会归属到操作它的账号。子账号通常只能更新自己负责的商品。</span>
             </label>
           )}
-          <p className="muted">发布在后台执行，可以离开本页面，进度可在「发布任务」查看。</p>
+          <p className="muted">发布在后台执行，可以离开本页面，进度可在「后台任务」查看。</p>
         </>
       ),
       onConfirm: () =>
@@ -208,7 +271,7 @@ export function ProductsPage() {
             <li>SKU（型号）相同但未关联的商品会自动关联 Alibaba 商品 ID；</li>
             <li>已关联的商品只更新 Alibaba 状态，不会覆盖本地已修改的内容。</li>
           </ul>
-          <p className="muted">商品较多时需要一些时间（每页 20 个）。</p>
+          <p className="muted">商品较多时需要一两分钟（每页 20 个）。系统每天也会自动执行一次。</p>
         </>
       ),
       onConfirm: () =>
@@ -227,7 +290,8 @@ export function ProductsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ productIds: selectedIds }),
       })
-      if (!response.ok) throw new Error(`导出失败（${response.status}）`)
+      if (response.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+      if (!response.ok) throw new Error(response.status === 401 ? '登录已过期，请重新登录。' : `导出失败（${response.status}）`)
       const url = URL.createObjectURL(await response.blob())
       const link = document.createElement('a')
       link.href = url
@@ -242,7 +306,7 @@ export function ProductsPage() {
       message: `确定要${online ? '上架' : '下架'}选中的 ${publishedSelected} 个已发布商品吗？`,
       danger: !online,
       confirmText: online ? '上架' : '下架',
-      onConfirm: () => void runBatch(online ? 'online' : 'offline', online ? '上架结果' : '下架结果', online ? '/api/catalog/online' : '/api/catalog/offline'),
+      onConfirm: () => void startJob(online ? 'online' : 'offline'),
     })
 
   const remove = (ids: string[]) =>
@@ -268,18 +332,18 @@ export function ProductsPage() {
   return (
     <div className="page">
       <section className="metrics">
-        <Metric label="商品总数" value={summary.total} onClick={() => setFilter('all')} />
-        <Metric label="待完善" value={summary.incomplete} tone={summary.incomplete ? 'warn' : undefined} onClick={() => setFilter('incomplete')} />
-        <Metric label="可发布" value={summary.ready} tone="good" onClick={() => setFilter('ready')} />
-        <Metric label="审核中" value={summary.pending} onClick={() => setFilter('Pending')} />
-        <Metric label="已上架" value={summary.online} tone="good" onClick={() => setFilter('Online')} />
-        <Metric label="发布失败" value={summary.failed} tone={summary.failed ? 'bad' : undefined} onClick={() => setFilter('Failed')} />
+        <Metric label="商品总数" value={summary.total} onClick={() => applyFilter('all')} />
+        <Metric label="已上架" value={summary.online} tone="good" onClick={() => applyFilter('Online')} />
+        <Metric label="审核中" value={summary.pending} onClick={() => applyFilter('Pending')} />
+        <Metric label="未通过/失败" value={summary.failed} tone={summary.failed ? 'bad' : undefined} onClick={() => applyFilter('Failed')} />
+        <Metric label="内容不完整" value={summary.needsContent} tone={summary.needsContent ? 'warn' : undefined} onClick={() => applyFilter('needs-content')} />
+        <Metric label="新品待发布" value={summary.drafts} onClick={() => applyFilter('incomplete')} />
       </section>
 
       {needsAlibaba && (
         <div className="banner warn">
-          <span>Alibaba 店铺尚未连接，发布、类目预测、同步等功能暂不可用。</span>
-          <button type="button" onClick={() => navigate('connection')}>去连接店铺</button>
+          <span>Alibaba 店铺尚未连接，发布、类目预测、同步等功能暂不可用。{user?.isAdmin ? '' : '请联系管理员。'}</span>
+          {user?.isAdmin && <button type="button" onClick={() => navigate('connection')}>去连接店铺</button>}
         </div>
       )}
 
@@ -298,7 +362,7 @@ export function ProductsPage() {
         </label>
         <div className="segmented">
           {filters.map((item) => (
-            <button key={item.key} type="button" className={clsx(filter === item.key && 'active')} onClick={() => { setFilter(item.key); setPage(1) }}>{item.label}</button>
+            <button key={item.key} type="button" className={clsx(filter === item.key && 'active')} onClick={() => applyFilter(item.key)}>{item.label}</button>
           ))}
           {accounts.length > 0 && (
             <select className="account-filter" value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setPage(1) }} aria-label="按账号筛选">
@@ -310,9 +374,11 @@ export function ProductsPage() {
         </div>
         <div className="actions">
           <button type="button" onClick={() => setEditing('new')}><Plus size={16} /> 新建</button>
-          <button type="button" onClick={pullFromAlibaba} disabled={busy !== null || needsAlibaba} title={alibabaHint ?? '把 Alibaba 店铺中已有的商品导入到本系统'}>
-            {busy === 'pull' ? <Spinner /> : <CloudDownload size={16} />} 从 Alibaba 导入
-          </button>
+          {user?.isAdmin && (
+            <button type="button" onClick={pullFromAlibaba} disabled={busy !== null || needsAlibaba} title={alibabaHint ?? '把 Alibaba 店铺中已有的商品导入到本系统'}>
+              {busy === 'pull' ? <Spinner /> : <CloudDownload size={16} />} 从 Alibaba 导入
+            </button>
+          )}
           <button type="button" onClick={() => downloadUrl('/api/catalog/import/template.xlsx')}><Download size={16} /> 模板</button>
           <button type="button" className="primary" onClick={() => fileInput.current?.click()} disabled={busy === 'import'} title="支持 .xlsx / .csv，也可以把文件拖到这里">
             {busy === 'import' ? <Spinner /> : <Upload size={16} />} 导入
@@ -326,22 +392,31 @@ export function ProductsPage() {
       </section>
 
       <section className={clsx('batchbar', !none && 'active')}>
-        <span>{none ? '勾选商品后可批量操作' : `已选 ${selectedIds.length} 个${publishedSelected ? `（已发布 ${publishedSelected} 个）` : ''}`}</span>
+        <span>
+          {none ? '勾选商品后可批量操作' : `已选 ${selectedIds.length} 个${publishedSelected ? `（已发布 ${publishedSelected} 个）` : ''}`}
+          {allVisibleSelected && filtered.length > selectedIds.length && (
+            <button type="button" className="link" onClick={() => setSelected(new Set(filtered.map((x) => x.id)))}>选择筛选出的全部 {filtered.length} 个</button>
+          )}
+          {!none && <button type="button" className="link" onClick={() => setSelected(new Set())}>清除</button>}
+        </span>
         <button type="button" onClick={qualityCheck} disabled={none || busy !== null}>{busy === 'quality' ? <Spinner /> : <PackageCheck size={16} />} 质检</button>
-        <button type="button" onClick={() => void runBatch('predict', '类目预测结果', '/api/catalog/predict-category')} disabled={none || busy !== null || needsAlibaba} title={alibabaHint}>
+        <button type="button" onClick={() => confirmJob('predict')} disabled={none || busy !== null || needsAlibaba} title={alibabaHint}>
           {busy === 'predict' ? <Spinner /> : <Tags size={16} />} 预测类目
         </button>
         <button type="button" className="primary" onClick={publish} disabled={none || busy !== null || needsAlibaba} title={alibabaHint}>
           {busy === 'publish' ? <Spinner /> : <Rocket size={16} />} 发布到 Alibaba
         </button>
         <span className="divider" />
-        <button type="button" onClick={() => void runBatch('status', '状态同步结果', '/api/catalog/sync/status')} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint ?? '查询 Alibaba 上架/审核状态'}>
+        <button type="button" onClick={() => void startJob('status')} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint ?? '查询 Alibaba 上架/审核状态'}>
           {busy === 'status' ? <Spinner /> : <RefreshCw size={16} />} 同步状态
         </button>
-        <button type="button" onClick={() => void runBatch('inventory', '库存同步结果', '/api/catalog/sync/inventory')} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint}>
+        <button type="button" onClick={refreshFromAlibaba} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint ?? '取回 Alibaba 上的最新内容；在 Alibaba 后台改过的商品，更新前要先刷新'}>
+          {busy === 'refresh' || busy === 'refresh-discard' ? <Spinner /> : <CloudDownload size={16} />} 从 Alibaba 刷新
+        </button>
+        <button type="button" onClick={() => confirmJob('inventory')} disabled={!stockSelected || busy !== null || needsAlibaba} title={alibabaHint ?? (stockSelected ? undefined : '选中的商品本地库存都是 0（B2B 商品通常不管库存），没有可同步的库存')}>
           {busy === 'inventory' ? <Spinner /> : <Warehouse size={16} />} 同步库存
         </button>
-        <button type="button" onClick={() => void runBatch('price', '价格同步结果', '/api/catalog/sync/price')} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint}>
+        <button type="button" onClick={() => confirmJob('price')} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint}>
           {busy === 'price' ? <Spinner /> : <DollarSign size={16} />} 同步价格
         </button>
         <button type="button" onClick={() => setOnline(true)} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint}>
@@ -354,7 +429,7 @@ export function ProductsPage() {
         <button type="button" onClick={() => void exportCsv()} disabled={busy === 'export'} title={none ? '导出全部商品' : '导出选中商品'}>
           <FileSpreadsheet size={16} /> 导出 CSV
         </button>
-        {accounts.some((a) => a.authorized) && (
+        {accounts.some((a) => a.authorized) && user?.isAdmin && (
           <select value="" disabled={none || busy !== null} aria-label="指定操作账号" title="指定用哪个账号发布、更新、同步选中的商品" onChange={(e) => {
             const value = e.target.value
             if (!value) return
@@ -376,13 +451,13 @@ export function ProductsPage() {
       {job && (
         <div className={clsx('job-progress', job.failed > 0 && 'has-errors')}>
           <div>
-            <strong>发布任务 · {jobStatusLabel[job.status]}</strong>
+            <strong>{jobKindLabel[job.kind ?? 'publish']} · {jobStatusLabel[job.status]}</strong>
             <span>已处理 {job.processed}/{job.total}，成功 {job.succeeded}，失败 {job.failed}</span>
           </div>
           <div className="progress"><div style={{ width: `${job.total ? (job.processed / job.total) * 100 : 0}%` }} /></div>
           {!['Queued', 'Running'].includes(job.status) && (
             <>
-              <button type="button" onClick={() => setBatch({ title: '发布结果', result: { total: job.total, succeeded: job.succeeded, failed: job.failed, items: job.items } })}>查看结果</button>
+              <button type="button" onClick={() => setBatch({ title: `${jobKindLabel[job.kind ?? 'publish']}结果`, result: { total: job.total, succeeded: job.succeeded, failed: job.failed, items: job.items } })}>查看结果</button>
               <button type="button" className="icon" aria-label="关闭" onClick={() => setJob(null)}>×</button>
             </>
           )}
@@ -416,6 +491,7 @@ export function ProductsPage() {
           <tbody>
             {visible.map((item) => {
               const blockers = item.qualityIssues.filter((x) => x.severity === 'Blocker').length
+              const variants = item.remoteSkuCount && item.remoteSkuCount > 1 ? item.remoteSkuCount : 0
               const warnings = item.qualityIssues.filter((x) => x.severity === 'Warning').length
               return (
                 <tr key={item.id} className={clsx(selected.has(item.id) && 'selected')}>
@@ -431,7 +507,7 @@ export function ProductsPage() {
                     <div className="product-cell">
                       {item.images[0] ? <img src={item.images[0]} alt="" loading="lazy" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} /> : <div className="img-placeholder" />}
                       <div>
-                        <button type="button" className="link" onClick={() => setEditing(item)}>{item.title || '（无标题）'}</button>
+                        <button type="button" className="link" onClick={() => void openEditor(item)}>{item.title || '（无标题）'}</button>
                         <span>{item.sku}{item.remoteProductId ? ` · Alibaba ${item.remoteProductId}` : ''}</span>
                       </div>
                     </div>
@@ -449,16 +525,19 @@ export function ProductsPage() {
                   <td className="col-num">{item.stock}</td>
                   <td className="col-state">
                     <button type="button" className="issue-button" onClick={() => setIssuesOf(item)}>
-                      {blockers ? <Pill tone="bad">{blockers} 个阻断</Pill> : warnings ? <Pill tone="warn">{warnings} 个建议</Pill> : <Pill tone="good">通过</Pill>}
+                      {blockers
+                        ? <Pill tone={item.remoteProductId ? 'warn' : 'bad'}>{item.remoteProductId ? '内容不完整' : `${blockers} 个阻断`}</Pill>
+                        : warnings ? <Pill tone="warn">{warnings} 个建议</Pill> : <Pill tone="good">通过</Pill>}
                     </button>
                   </td>
                   <td className="col-state">
                     <Pill tone={publishStateTone[item.publishState]}>{publishStateLabel[item.publishState]}</Pill>
                     {item.hasUnpublishedChanges && <Pill tone="warn">有未发布的修改</Pill>}
+                    {variants > 0 && <Pill tone="neutral">{variants} 个规格</Pill>}
                     {item.remoteStatusMessage && <small className="muted clip" title={item.remoteStatusMessage}>{item.remoteStatusMessage}</small>}
                   </td>
                   <td className="col-actions row-actions">
-                    <button type="button" className="icon" aria-label="编辑" title="编辑" onClick={() => setEditing(item)}><Pencil size={15} /></button>
+                    <button type="button" className="icon" aria-label="编辑" title="编辑" onClick={() => void openEditor(item)}><Pencil size={15} /></button>
                     <button type="button" className="icon" aria-label="删除" title="删除" onClick={() => remove([item.id])}><Trash2 size={15} /></button>
                   </td>
                 </tr>
@@ -496,7 +575,7 @@ export function ProductsPage() {
 
       {issuesOf && (
         <Modal title={`质检结果 · ${issuesOf.sku}`} subtitle={issuesOf.title} onClose={() => setIssuesOf(null)}
-          footer={<button type="button" className="primary" onClick={() => { setEditing(issuesOf); setIssuesOf(null) }}><Pencil size={16} /> 去修改</button>}>
+          footer={<button type="button" className="primary" onClick={() => { void openEditor(issuesOf); setIssuesOf(null) }}><Pencil size={16} /> 去修改</button>}>
           {issuesOf.qualityIssues.length === 0
             ? <p className="good"><CheckCircle2 size={16} /> 全部检查通过。</p>
             : (
@@ -526,6 +605,7 @@ export function ProductsPage() {
       {pullResult && (
         <Modal title="从 Alibaba 导入完成" subtitle={`读取 ${pullResult.total} 个商品（${pullResult.pages} 页）`} onClose={() => setPullResult(null)}>
           <p>新建 {pullResult.created} 个，按 SKU 关联 {pullResult.linked} 个，更新状态 {pullResult.refreshed} 个。</p>
+          {pullResult.missing > 0 && <p className="warn">{pullResult.missing} 个商品在 Alibaba 上已找不到（可能已删除），已标为下架，状态说明中有提示。</p>}
           {pullResult.warnings.map((warning, index) => <p key={index} className="warn">{warning}</p>)}
           {pullResult.created > 0 && <p className="muted">新建的商品已自动质检；多规格（SKU）商品在本系统中按单一价格和总库存显示。</p>}
         </Modal>

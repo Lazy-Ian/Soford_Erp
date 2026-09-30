@@ -18,6 +18,18 @@ export const publishStateTone: Record<PublishState, Tone> = {
   Failed: 'bad',
 }
 
+export const jobKindLabel: Record<string, string> = {
+  publish: '发布',
+  status: '同步状态',
+  inventory: '同步库存',
+  price: '同步价格',
+  online: '上架',
+  offline: '下架',
+  predict: '预测类目',
+  refresh: '从 Alibaba 刷新',
+  'refresh-discard': '放弃修改并刷新',
+}
+
 export const jobStatusLabel: Record<PublishJobStatus, string> = {
   Queued: '排队中',
   Running: '执行中',
