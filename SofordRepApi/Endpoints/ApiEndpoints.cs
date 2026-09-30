@@ -116,6 +116,9 @@ public static class ApiEndpoints
 
         api.MapGet("/system/automation", (AutomationState state) => Results.Ok(state.Current));
 
+        // Optional features the UI shows only when the server is configured for them.
+        api.MapGet("/system/features", (ListingAdvisor advisor) => Results.Ok(new { AiSuggestions = advisor.Enabled }));
+
         api.MapPost("/system/automation/run", async (RemoteSyncWorker worker) => Results.Ok(await worker.RunOnceAsync())).RequireAuthorization(AdminPolicy);
 
         api.MapGet("/audit", async (ClaimsPrincipal principal, AccessService access, AuditLog audit, int take = 200) =>
@@ -409,6 +412,23 @@ public static class ApiEndpoints
             var deleted = await repo.DeleteManyAsync(allowed);
             await audit.RecordAsync(await access.CurrentAsync(principal), "删除商品", $"删除 {deleted} 个商品（仅本系统）", deleted);
             return Results.Ok(new { Deleted = deleted });
+        });
+
+        // Suggestions only: nothing is written. The editor fills the form, and the person saves and publishes as usual.
+        products.MapPost("/{id:guid}/ai-suggest", async (Guid id, ProductRepository repo, ListingAdvisor advisor, ClaimsPrincipal principal, AccessService access, AuditLog audit, CancellationToken cancellationToken) =>
+        {
+            var product = await repo.GetAsync(id);
+            if (product is null || !(await access.VisibleAsync(principal))(product)) return Results.NotFound();
+            try
+            {
+                var suggestion = await advisor.SuggestAsync(product, cancellationToken);
+                await audit.RecordAsync(await access.CurrentAsync(principal), "AI 建议", product.Sku, 1);
+                return Results.Ok(suggestion);
+            }
+            catch (ListingAdvisorException ex)
+            {
+                return Problem("AI 建议失败", ex.Message, advisor.Enabled ? StatusCodes.Status502BadGateway : StatusCodes.Status400BadRequest);
+            }
         });
 
         products.MapGet("/{id:guid}/listing-preview", async (Guid id, ProductRepository repo, ClaimsPrincipal principal, AccessService access) =>

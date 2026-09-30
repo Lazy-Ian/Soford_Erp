@@ -35,6 +35,7 @@ sudo systemctl restart soford-erp-api
 | `Alibaba__OAuthCallbackUrl` | 必须与 App Console 登记的回调地址一致：`https://erp.soford.cn/openapi/callback` |
 | `Soford__AutoSync__IntervalMinutes` | 可选，自动同步间隔（默认 30 分钟，0 关闭） |
 | `Soford__AutoSync__PullHours` | 可选，每隔多少小时自动从 Alibaba 读取一次全部商品（默认 24，0 关闭） |
+| `Anthropic__ApiKey` | 可选，填写后编辑器出现「AI 建议标题和关键词」（使用 Claude，按调用量计费；留空则不显示） |
 
 然后浏览器打开 `https://erp.soford.cn` →「店铺连接」自检 → 授权店铺。
 

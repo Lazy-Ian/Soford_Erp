@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react'
-import { ArrowDown, ArrowUp, CheckCircle2, Code2, ImageUp, ListChecks, Plus, Sparkles, Trash2 } from 'lucide-react'
-import { api, errorText, type CategoryAttributeSet, type Product, type ProductDraft } from '../api'
+import { useCallback, useRef, useState } from 'react'
+import { ArrowDown, ArrowUp, CheckCircle2, Code2, ImageUp, ListChecks, Plus, Sparkles, Trash2, Wand2 } from 'lucide-react'
+import { api, errorText, post, type CategoryAttributeSet, type Features, type ListingSuggestion, type Product, type ProductDraft } from '../api'
+import { useInitialLoad } from '../hooks'
 import { Modal, Spinner } from '../components/ui'
 import { useApp } from '../context'
 import { splitList } from '../format'
@@ -66,6 +67,26 @@ export function ProductEditor({ product, saving, onClose, onSave }: {
   const [newImage, setNewImage] = useState('')
   const fileInput = useRef<HTMLInputElement | null>(null)
   const [snapshot] = useState(() => JSON.stringify([form, keywordText, attributes]))
+  const [features, setFeatures] = useState<Features | null>(null)
+  const [suggestion, setSuggestion] = useState<ListingSuggestion | null>(null)
+
+  const loadFeatures = useCallback(async () => {
+    setFeatures(await api<Features>('/api/system/features').catch(() => null))
+  }, [])
+  useInitialLoad(loadFeatures)
+
+  const suggest = async () => {
+    if (!product) return
+    setBusy('suggest')
+    setError(null)
+    try {
+      setSuggestion(await post<ListingSuggestion>(`/api/catalog/products/${product.id}/ai-suggest`))
+    } catch (err) {
+      setError(errorText(err, 'AI 建议失败'))
+    } finally {
+      setBusy(null)
+    }
+  }
 
   // Escape, the backdrop and 取消 all come through here, so an accidental click never throws away edits.
   const close = () => {
@@ -208,6 +229,27 @@ export function ProductEditor({ product, saving, onClose, onSave }: {
                 <option value="zh_CN">中文 zh_CN（Alibaba 自动翻译）</option>
               </select>
             </label>
+            {product && features?.aiSuggestions && (
+              <div className="span4 ai-suggest">
+                <button type="button" onClick={() => void suggest()} disabled={busy === 'suggest'} title="根据已保存的标题、类目、属性和描述生成建议；不会自动修改">
+                  {busy === 'suggest' ? <Spinner /> : <Wand2 size={16} />} AI 建议标题和关键词
+                </button>
+                {suggestion && (
+                  <div className="suggestion">
+                    {suggestion.notes && <p className="muted">{suggestion.notes}</p>}
+                    <div className="suggestion-row">
+                      <span><b>标题</b>（{suggestion.title.length} 字符）{suggestion.title}</span>
+                      <button type="button" onClick={() => set('title', suggestion.title)} disabled={form.title === suggestion.title}>采用标题</button>
+                    </div>
+                    <div className="suggestion-row">
+                      <span><b>关键词</b> {suggestion.keywords.join('; ')}</span>
+                      <button type="button" onClick={() => setKeywordText(suggestion.keywords.join('; '))}>采用关键词</button>
+                    </div>
+                    <small className="muted">采用后请检查内容是否属实，再保存；已上架商品需要再「发布到 Alibaba」才会更新。</small>
+                  </div>
+                )}
+              </div>
+            )}
             <label className="span4">英文标题 *（≤128 字符，当前 {form.title.length}）
               <input value={form.title} onChange={(e) => set('title', e.target.value)} maxLength={200} />
             </label>

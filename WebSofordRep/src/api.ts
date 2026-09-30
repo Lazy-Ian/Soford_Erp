@@ -178,6 +178,8 @@ export type ImportResult = { created: number; updated: number; skipped: number; 
 /** `expired` marks a session that ended while the app was open: login is shown over the page so unsaved work survives. */
 export type AuthSession = { authenticated: boolean; username?: string | null; role?: 'Admin' | 'Operator' | null; canChangePassword?: boolean; expired?: boolean }
 export type AppUser = { id: string; username: string; displayName: string; role: 'Admin' | 'Operator'; accountIds: string[]; disabled: boolean; createdAt: string }
+export type ListingSuggestion = { title: string; keywords: string[]; notes: string }
+export type Features = { aiSuggestions: boolean }
 export type AuditEntry = { id: string; at: string; userId: string; userName: string; action: string; summary: string; count: number }
 
 export class ApiError extends Error {

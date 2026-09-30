@@ -96,6 +96,7 @@ builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddSingleton<UserStore>();
 builder.Services.AddSingleton<AccessService>();
 builder.Services.AddSingleton<AuditLog>();
+builder.Services.AddSingleton<ListingAdvisor>();
 builder.Services.AddHttpClient("diagnostics");
 // Per-call timeouts are applied in AlibabaTransport; this is only an outer safety net.
 builder.Services.AddHttpClient(AlibabaTransport.HttpClientName, client => client.Timeout = TimeSpan.FromMinutes(5));

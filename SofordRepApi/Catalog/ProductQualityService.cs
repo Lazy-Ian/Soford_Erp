@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 public sealed partial class ProductQualityService(CategoryAttributeService categories)
 {
     public const int MaxImages = 6;
+    public const int MaxTitleLength = 128;
 
     /// <summary>Runs all checks, stores the issues and derives LocalState. Alibaba-side state is left untouched.</summary>
     public async Task<List<QualityIssue>> ApplyAsync(ProductRecord product)
