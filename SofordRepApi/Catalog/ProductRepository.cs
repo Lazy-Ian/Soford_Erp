@@ -264,7 +264,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
             try
             {
                 var result = change(all);
-                await JsonFile.WriteAtomicAsync(_file, all);
+                await JsonFile.WriteAtomicAsync(_file, all, JsonFile.Compact);
                 return result is ProductRecord product ? (T)(object)product.Copy() : result;
             }
             catch

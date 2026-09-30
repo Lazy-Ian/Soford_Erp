@@ -10,6 +10,8 @@ public class UpdateSafetyTests
     private sealed class FakeGateway : HttpMessageHandler
     {
         public Dictionary<string, string> Bodies { get; } = [];
+        /// <summary>Answers used once, before <see cref="Bodies"/>, to simulate transient failures.</summary>
+        public Dictionary<string, Queue<string>> First { get; } = [];
         public List<string> Calls { get; } = [];
         public List<string> Sent { get; } = [];
 
@@ -18,7 +20,8 @@ public class UpdateSafetyTests
             var path = request.RequestUri!.AbsolutePath.Replace("/rest", "");
             Calls.Add(path);
             Sent.Add(request.Content is null ? "" : Uri.UnescapeDataString(await request.Content.ReadAsStringAsync(cancellationToken)));
-            var body = Bodies.TryGetValue(path, out var canned) ? canned : """{"code":"0"}""";
+            var body = First.TryGetValue(path, out var queue) && queue.Count > 0 ? queue.Dequeue()
+                : Bodies.TryGetValue(path, out var canned) ? canned : """{"code":"0"}""";
             return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body) };
         }
     }
@@ -34,7 +37,9 @@ public class UpdateSafetyTests
         var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["Alibaba:AppKey"] = "k",
-            ["Alibaba:AppSecret"] = "s"
+            ["Alibaba:AppSecret"] = "s",
+            ["Alibaba:RetryDelaysMs"] = "1,1",
+            ["Alibaba:MinIntervalMs"] = "0"
         }).Build();
         var gateway = new FakeGateway();
         var transport = new AlibabaTransport(new Factory(gateway), new AlibabaApiLogStore(paths), TimeProvider.System, NullLogger<AlibabaTransport>.Instance);
@@ -49,7 +54,7 @@ public class UpdateSafetyTests
             return true;
         });
         var tokens = new AlibabaTokenService(transport, store, config, TimeProvider.System);
-        var client = new AlibabaClient(transport, tokens, config);
+        var client = new AlibabaClient(transport, tokens, config, TimeProvider.System);
         var products = new ProductRepository(paths, TimeProvider.System);
         var quality = new ProductQualityService(new CategoryAttributeService(paths, TimeProvider.System));
         var operations = new ProductOperations(products, quality, client, new ProductLocks(), TimeProvider.System, tokens, NullLogger<ProductOperations>.Instance);
@@ -166,5 +171,38 @@ public class UpdateSafetyTests
 
         Assert.True((await operations.RefreshContentAsync(product.Id, discardLocalChanges: true)).Success);
         Assert.Equal("Title on Alibaba", (await products.GetAsync(product.Id))!.Title);
+    }
+
+    private const string Timeout = """{"type":"ISP","code":"ServiceTimeout","message":"The request has failed due to RPC timeout"}""";
+
+    [Fact]
+    public async Task ReadOnlyCalls_AreRetriedAfterTransientFailures()
+    {
+        var (operations, products, gateway) = await SetupAsync();
+        var product = Imported(DateTimeOffset.UtcNow.AddDays(-2));
+        product.ContentUpdatedAt = product.PublishedContentAt;
+        product = await products.CreateAsync(product);
+        gateway.First["/alibaba/icbu/product/get/v2"] = new([Timeout, Timeout]);
+        gateway.Bodies["/alibaba/icbu/product/get/v2"] = ListingJson(DateTimeOffset.UtcNow);
+
+        var result = await operations.RefreshContentAsync(product.Id, discardLocalChanges: false);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(3, gateway.Calls.Count(x => x == "/alibaba/icbu/product/get/v2"));
+    }
+
+    [Fact]
+    public async Task WritingCalls_AreNeverRetried()
+    {
+        var (operations, products, gateway) = await SetupAsync();
+        var importedAt = DateTimeOffset.UtcNow.AddDays(-2);
+        var product = await products.CreateAsync(Imported(importedAt));
+        gateway.Bodies["/alibaba/icbu/product/get/v2"] = ListingJson(importedAt.AddDays(-1));
+        gateway.Bodies["/alibaba/icbu/product/update/v2"] = Timeout;
+
+        var result = await operations.PublishAsync(product.Id);
+
+        Assert.False(result.Success);
+        Assert.Equal(1, gateway.Calls.Count(x => x == "/alibaba/icbu/product/update/v2"));
     }
 }

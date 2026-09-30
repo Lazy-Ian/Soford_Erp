@@ -28,7 +28,7 @@ export function LogsPage() {
     const key = query.trim().toLowerCase()
     return (logs ?? []).filter((log) =>
       (!onlyFailed || !log.success) &&
-      (!key || [log.apiKey, log.path, log.errorCode ?? '', log.message, log.requestId ?? ''].some((value) => value?.toLowerCase().includes(key))))
+      (!key || [log.apiKey, log.path, log.errorCode ?? '', log.message, log.requestId ?? '', log.account ?? ''].some((value) => value?.toLowerCase().includes(key))))
   }, [logs, onlyFailed, query])
 
   return (
@@ -54,7 +54,7 @@ export function LogsPage() {
                 {open === log.id ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
                 <Pill tone={log.success ? 'good' : 'bad'}>{log.success ? '成功' : '失败'}</Pill>
                 <b>{log.apiKey}</b>
-                <span className="muted">{formatDate(log.createdAt)} · {log.durationMs}ms</span>
+                <span className="muted">{formatDate(log.createdAt)} · {log.durationMs}ms{log.account ? ` · ${log.account}` : ''}</span>
                 <span className="log-message">{log.success ? '' : `${log.errorCode ?? ''} ${log.message}`}</span>
               </button>
               {open === log.id && (

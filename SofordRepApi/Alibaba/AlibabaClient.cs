@@ -3,9 +3,28 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 
-/// <summary>Business-level Alibaba caller: resolves the API from the registry and attaches a valid seller token.</summary>
-public sealed class AlibabaClient(AlibabaTransport transport, AlibabaTokenService tokens, IConfiguration config)
+/// <summary>
+/// Business-level Alibaba caller: resolves the API from the registry, attaches a valid seller token, paces calls and
+/// retries read-only calls after transient failures (Alibaba answers ServiceTimeout and AppCallLimit now and then).
+/// </summary>
+public sealed class AlibabaClient(AlibabaTransport transport, AlibabaTokenService tokens, IConfiguration config, TimeProvider time)
 {
+    private static readonly HashSet<string> Transient = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ServiceTimeout", "AppCallLimit", "ApiCallLimit", "NetworkError", "ServiceUnavailable", "SYSTEM_BUSY", "HTTP502", "HTTP503", "HTTP504"
+    };
+
+    private readonly SemaphoreSlim _pace = new(1, 1);
+    private DateTimeOffset _lastCall = DateTimeOffset.MinValue;
+
+    /// <summary>Waits between retries of read-only calls, e.g. "1000,3000"; configurable so tests do not sleep.</summary>
+    private TimeSpan[] RetryDelays =>
+        (config["Alibaba:RetryDelaysMs"] ?? "1000,3000").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(x => int.TryParse(x, out var ms) ? TimeSpan.FromMilliseconds(Math.Max(ms, 0)) : TimeSpan.Zero).ToArray();
+
+    /// <summary>Minimum gap between call starts across the whole process; batch jobs and the background sync share it.</summary>
+    private TimeSpan MinInterval => TimeSpan.FromMilliseconds(int.TryParse(config["Alibaba:MinIntervalMs"], out var ms) ? Math.Max(ms, 0) : 150);
+
     /// <param name="accountId">Account whose authorization to use; null uses the default account.</param>
     public async Task<AlibabaApiResult> CallAsync(string apiKey, object? payload, AlibabaFile? file = null, CancellationToken cancellationToken = default, Guid? accountId = null)
     {
@@ -36,6 +55,7 @@ public sealed class AlibabaClient(AlibabaTransport transport, AlibabaTokenServic
         }
 
         string? accessToken = null;
+        string? accountName = null;
         if (api.RequiresToken)
         {
             var (token, error) = await tokens.GetValidAccessTokenAsync(accountId);
@@ -45,9 +65,35 @@ public sealed class AlibabaClient(AlibabaTransport transport, AlibabaTokenServic
             }
 
             accessToken = token.AccessToken;
+            accountName = token.AccountName;
         }
 
-        return await transport.SendAsync(settings, api.Key, api.Path, parameters, accessToken, file, cancellationToken);
+        var delays = AlibabaSettings.ReadOnlyApis.Contains(apiKey) ? RetryDelays : [];
+        for (var attempt = 0; ; attempt++)
+        {
+            await PaceAsync(cancellationToken);
+            var result = await transport.SendAsync(settings, api.Key, api.Path, parameters, accessToken, file, cancellationToken, accountName: accountName);
+            if (result.Success || attempt >= delays.Length || !Transient.Contains(result.ErrorCode ?? "")) return result;
+
+            // Rate limits need a longer breath than a one-off timeout.
+            var wait = result.ErrorCode is "AppCallLimit" or "ApiCallLimit" ? delays[attempt] * 3 : delays[attempt];
+            await Task.Delay(wait, time, cancellationToken);
+        }
+    }
+
+    private async Task PaceAsync(CancellationToken cancellationToken)
+    {
+        await _pace.WaitAsync(cancellationToken);
+        try
+        {
+            var wait = _lastCall + MinInterval - time.GetUtcNow();
+            if (wait > TimeSpan.Zero) await Task.Delay(wait, time, cancellationToken);
+            _lastCall = time.GetUtcNow();
+        }
+        finally
+        {
+            _pace.Release();
+        }
     }
 }
 

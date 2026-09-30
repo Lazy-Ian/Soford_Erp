@@ -31,13 +31,6 @@ public static class ApiEndpoints
     /// <summary>Store-wide settings, accounts, users and raw API access.</summary>
     public const string AdminPolicy = "admin";
 
-    private static readonly HashSet<string> ReadOnlyApis = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "category.get", "category.attributes", "category.idMapping", "category.predict",
-        "photobank.group.list", "photobank.list", "video.query",
-        "product.get", "product.search", "product.status", "product.shippingTemplates",
-        "order.search", "order.detail"
-    };
 
     public static IResult Problem(string title, string? detail = null, int status = StatusCodes.Status400BadRequest) =>
         Results.Problem(title: title, detail: detail, statusCode: status);
@@ -257,7 +250,7 @@ public static class ApiEndpoints
         // The workbench is for looking things up. Outside Development it cannot change listings or mint tokens:
         // those go through the product pages, which check quality and record the outcome on the product.
         admin.MapPost("/call", async (AlibabaCallRequest request, AlibabaClient client, IHostEnvironment env) =>
-            !env.IsDevelopment() && !ReadOnlyApis.Contains(request.ApiKey)
+            !env.IsDevelopment() && !AlibabaSettings.ReadOnlyApis.Contains(request.ApiKey)
                 ? Problem("该接口不能在调试台调用", $"{request.ApiKey} 会修改店铺数据或生成授权，只能在开发环境调试；请使用商品页面的对应功能。", StatusCodes.Status403Forbidden)
                 : Results.Ok(await client.CallAsync(request.ApiKey, request.Payload is { ValueKind: JsonValueKind.Object } payload ? payload : null, accountId: request.AccountId)));
 

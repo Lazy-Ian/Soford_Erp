@@ -60,6 +60,18 @@ public sealed record AlibabaSettings(
 
     private static string? FirstNonEmpty(params string?[] values) => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim();
 
+    /// <summary>
+    /// APIs that only read. They may be retried after a transient failure and called from the workbench;
+    /// anything else changes the store and runs only once.
+    /// </summary>
+    public static readonly IReadOnlySet<string> ReadOnlyApis = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "category.get", "category.attributes", "category.idMapping", "category.predict",
+        "photobank.group.list", "photobank.list", "video.query",
+        "product.get", "product.search", "product.status", "product.shippingTemplates",
+        "order.search", "order.detail"
+    };
+
     public static readonly IReadOnlyList<AlibabaApiDefinition> DefaultApis =
     [
         new("auth.token.create", "auth", "/auth/token/create", false, "用授权码换取 access_token"),

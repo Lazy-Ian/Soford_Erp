@@ -23,7 +23,8 @@ public sealed class AlibabaTransport(IHttpClientFactory httpClientFactory, Aliba
         string? accessToken,
         AlibabaFile? file = null,
         CancellationToken cancellationToken = default,
-        bool audit = true)
+        bool audit = true,
+        string? accountName = null)
     {
         if (!settings.HasCredentials)
         {
@@ -93,7 +94,8 @@ public sealed class AlibabaTransport(IHttpClientFactory httpClientFactory, Aliba
             result.RequestId,
             result.DurationMs,
             SummarizeRequest(businessParameters, file),
-            SummarizeResponse(apiKey, result)));
+            SummarizeResponse(apiKey, result),
+            accountName));
         return result;
     }
 
@@ -162,7 +164,8 @@ public sealed record ApiCallLogRecord(
     string? RequestId,
     long DurationMs,
     string? Request,
-    string? Response);
+    string? Response,
+    string? Account = null);
 
 public sealed class AlibabaApiLogStore(AppPaths paths)
 {
@@ -184,7 +187,7 @@ public sealed class AlibabaApiLogStore(AppPaths paths)
                 logs.RemoveRange(0, logs.Count - MaxEntries);
             }
 
-            await JsonFile.WriteAtomicAsync(_file, logs);
+            await JsonFile.WriteAtomicAsync(_file, logs, JsonFile.Compact);
         }
         finally
         {

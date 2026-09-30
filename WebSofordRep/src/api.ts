@@ -155,6 +155,7 @@ export type ApiCallLog = {
   durationMs: number
   request?: string | null
   response?: string | null
+  account?: string | null
 }
 
 export type AlibabaApiResult = {

@@ -26,11 +26,14 @@ public sealed class AppPaths
 
 public static class JsonFile
 {
-    public static readonly JsonSerializerOptions Options = CreateOptions();
+    public static readonly JsonSerializerOptions Options = CreateOptions(indented: true);
 
-    private static JsonSerializerOptions CreateOptions()
+    /// <summary>For the large files (products, API logs): indentation adds a fifth to files rewritten on every change.</summary>
+    public static readonly JsonSerializerOptions Compact = CreateOptions(indented: false);
+
+    private static JsonSerializerOptions CreateOptions(bool indented)
     {
-        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = true };
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = indented };
         options.Converters.Add(new JsonStringEnumConverter());
         return options;
     }
@@ -54,7 +57,7 @@ public static class JsonFile
     }
 
     /// <summary>Writes to a temp file first, then atomically replaces the target so a crash never leaves a truncated file.</summary>
-    public static async Task WriteAtomicAsync<T>(string path, T value)
+    public static async Task WriteAtomicAsync<T>(string path, T value, JsonSerializerOptions? options = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temp = $"{path}.{Guid.NewGuid():N}.tmp";
@@ -62,7 +65,7 @@ public static class JsonFile
         {
             await using (var stream = System.IO.File.Create(temp))
             {
-                await JsonSerializer.SerializeAsync(stream, value, Options);
+                await JsonSerializer.SerializeAsync(stream, value, options ?? Options);
                 // Reach the disk before the rename, or a power cut can leave the renamed file empty.
                 stream.Flush(flushToDisk: true);
             }
