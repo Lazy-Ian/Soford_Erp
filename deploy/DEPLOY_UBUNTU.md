@@ -1,6 +1,6 @@
 # Soford ERP Ubuntu 部署（无 Docker）
 
-目标服务器：Ubuntu 22.04 x64，公网 IP `39.106.188.160`，域名 `erp.soford.cn`（DNS 需先解析到该 IP）。
+目标服务器：Ubuntu 22.04 x64，公网 IP `39.106.188.160`，主域名 `erp.soford.cn`（DNS 需先解析到该 IP）。主域名等待 ICP 接入或证书修复期间，生产备用入口为 `https://stepnex.cn/erp/`。
 
 组成：Nginx（静态前端 + `/api`、`/openapi/callback` 反向代理）→ systemd 服务 `soford-erp-api`（`127.0.0.1:5153`）→ 数据目录 `/opt/soford-erp/app_data`。
 
@@ -32,12 +32,22 @@ sudo systemctl restart soford-erp-api
 |----|------|
 | `Auth__AdminPassword` | 至少 10 位的强密码（模板值或过短会拒绝启动） |
 | `Alibaba__AppKey` / `Alibaba__AppSecret` | App Console 中的应用凭证 |
-| `Alibaba__OAuthCallbackUrl` | 必须与 App Console 登记的回调地址一致：`https://erp.soford.cn/openapi/callback` |
+| `Alibaba__OAuthCallbackUrl` | 必须与 App Console 登记的回调地址一致；当前线上使用 `https://stepnex.cn/erp/openapi/callback` |
 | `Soford__AutoSync__IntervalMinutes` | 可选，自动同步间隔（默认 30 分钟，0 关闭） |
 | `Soford__AutoSync__PullHours` | 可选，每隔多少小时自动从 Alibaba 读取一次全部商品（默认 24，0 关闭） |
 | `Anthropic__ApiKey` | 可选，填写后编辑器出现「AI 建议标题和关键词」（使用 Claude，按调用量计费；留空则不显示） |
 
-然后浏览器打开 `https://erp.soford.cn` →「店铺连接」自检 → 授权店铺。
+然后浏览器打开当前可用入口 `https://stepnex.cn/erp/` →「店铺连接」自检 → 授权店铺。
+
+## 备用入口 stepnex.cn/erp
+
+stepnex.cn 的 nginx 站点同时服务博客等其他应用，ERP 只占用 `/erp` 前缀。配置见 [nginx/snippets/stepnex-erp.locations.conf](nginx/snippets/stepnex-erp.locations.conf)（文件开头有安装说明，CI 会对它做 `nginx -t`）：
+
+1. 复制到 `/etc/nginx/snippets/`，在 stepnex.cn 的 443 server 块里 `include`；80 端口块里把 `/erp` 重定向到 HTTPS。
+2. `soford-api.env` 中 `AllowedHosts` 包含 `stepnex.cn`，回调与跳转地址使用 `https://stepnex.cn/erp/...`（模板已按此填写）；App Console 登记的回调地址同步修改。
+3. 前端构建使用相对路径，同一份产物可在 `/` 或 `/erp/` 下运行，无需重新构建。
+
+注意：ERP 与同域名的其他网站属于同一来源，跨站请求防护无法区分它们。主域名备案完成后应尽快切回 `erp.soford.cn`（改回上面两个地址和 App Console 回调）。
 
 ## 手动步骤（不使用 deploy-upload.ps1 时）
 

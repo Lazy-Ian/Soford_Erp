@@ -3,6 +3,8 @@ public sealed class SkuConflictException(string sku) : Exception($"SKU '{sku}' �
     public string Sku { get; } = sku;
 }
 
+public sealed class ProductConcurrencyException(Guid id) : Exception($"商品 {id} 已被其他人或后台任务修改，请刷新后重试。");
+
 /// <summary>
 /// JSON-file product store, kept in memory after the first read (the file is tens of MB once Alibaba descriptions
 /// are imported). Every read returns fresh copies, so callers never share mutable state.
@@ -47,12 +49,20 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
     });
 
     /// <summary>Applies a mutation to the stored product under the lock. Returns null when it no longer exists.</summary>
-    public Task<ProductRecord?> UpdateAsync(Guid id, Action<ProductRecord> mutate) => WriteAsync(all =>
+    public Task<ProductRecord?> UpdateAsync(Guid id, Action<ProductRecord> mutate) => UpdateAsync(id, null, mutate);
+
+    /// <summary>Updates only the version the caller loaded, preventing two editors from silently overwriting each other.</summary>
+    public Task<ProductRecord?> UpdateAsync(Guid id, DateTimeOffset? expectedUpdatedAt, Action<ProductRecord> mutate) => WriteAsync(all =>
     {
         var product = all.FirstOrDefault(x => x.Id == id);
         if (product is null)
         {
             return null;
+        }
+
+        if (expectedUpdatedAt is not null && product.UpdatedAt != expectedUpdatedAt.Value)
+        {
+            throw new ProductConcurrencyException(id);
         }
 
         var skuBefore = product.Sku;
@@ -91,7 +101,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
     /// <param name="canEdit">Existing products the importing user may change; others are skipped with a warning.</param>
     /// <param name="actor">Recorded as creator/editor.</param>
     public Task<(int Created, int Updated)> ImportAsync(IEnumerable<ImportRow> rows, Action<ProductRecord> afterApply, List<string>? warnings = null,
-        Func<ProductRecord, bool>? canEdit = null, string? actor = null) => WriteAsync(all =>
+        Func<ProductRecord, bool>? canEdit = null, string? actor = null, string mode = ImportModes.Upsert) => WriteAsync(all =>
     {
         var created = 0;
         var updated = 0;
@@ -124,11 +134,30 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
                 continue;
             }
 
+            if (existing is not null && mode == ImportModes.CreateOnly)
+            {
+                warnings?.Add($"第 {row.RowNumber} 行：商品 {existing.Sku} 已存在，仅新增模式已跳过。");
+                continue;
+            }
+
+            if (existing is null && mode is ImportModes.UpdateOnly or ImportModes.StockPrice)
+            {
+                warnings?.Add($"第 {row.RowNumber} 行：找不到商品 {sku}，{(mode == ImportModes.StockPrice ? "库存价格模式" : "仅更新模式")}已跳过。");
+                continue;
+            }
+
+            var present = ImportModes.PresentFields(row, mode);
+            if (mode == ImportModes.StockPrice && present.Count == 0)
+            {
+                warnings?.Add($"第 {row.RowNumber} 行：文件中没有库存或价格列，已跳过。");
+                continue;
+            }
+
             if (existing is not null)
             {
                 var before = existing.ContentSignature();
                 existing.UpdatedBy = actor ?? existing.UpdatedBy;
-                existing.ApplyImportedFields(draft, row.Present);
+                existing.ApplyImportedFields(draft, present);
                 afterApply(existing);
                 existing.UpdatedAt = now;
                 // Stock-only sheets are routine; only real content changes should flag a published product as unsynced.

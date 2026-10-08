@@ -200,4 +200,54 @@ public class ReviewFixTests
         first.Dispose();
         (await second).Dispose();
     }
+
+    [Fact]
+    public void DamagedPasswordHashFailsClosed()
+    {
+        Assert.False(PasswordHasher.Verify("anything", "v1$100000$not-base64$also-bad"));
+        Assert.False(PasswordHasher.Verify("anything", "v1$999999999$AA==$AA=="));
+    }
+
+    [Fact]
+    public async Task StaleProductUpdateIsRejectedWithoutOverwritingNewerData()
+    {
+        var repo = NewRepository(out _);
+        var stale = await repo.CreateAsync(new ProductRecord { Sku = "A1", Title = "Original" });
+        await repo.UpdateAsync(stale.Id, product => product.Title = "Newer edit");
+
+        await Assert.ThrowsAsync<ProductConcurrencyException>(() =>
+            repo.UpdateAsync(stale.Id, stale.UpdatedAt, product => product.Title = "Stale edit"));
+
+        Assert.Equal("Newer edit", (await repo.GetAsync(stale.Id))!.Title);
+    }
+
+    [Fact]
+    public void ImportRejectsExcessiveRowCount()
+    {
+        var csv = new StringBuilder("Sku\n");
+        for (var i = 0; i <= ProductImportService.MaxImportRows; i++) csv.Append("S").Append(i).Append('\n');
+
+        var error = Assert.Throws<ImportFormatException>(() =>
+            new ProductImportService().Parse(new MemoryStream(Encoding.UTF8.GetBytes(csv.ToString())), "too-many.csv"));
+
+        Assert.Contains(ProductImportService.MaxImportRows.ToString(), error.Message);
+    }
+
+    [Fact]
+    public async Task StockPriceImportDoesNotOverwriteListingContent()
+    {
+        var repo = NewRepository(out _);
+        var product = await repo.CreateAsync(new ProductRecord { Sku = "A1", Title = "Keep title", Price = 10, Stock = 5 });
+        var parsed = new ProductImportService().Parse(
+            new MemoryStream(Encoding.UTF8.GetBytes("Sku,Title,Price,Stock\nA1,Do not copy,12.5,99\n")), "prices.csv");
+
+        var result = await repo.ImportAsync(parsed.Rows, _ => { }, mode: ImportModes.StockPrice);
+
+        var after = (await repo.GetAsync(product.Id))!;
+        Assert.Equal((0, 1), result);
+        Assert.Equal("Keep title", after.Title);
+        Assert.Equal(12.5m, after.Price);
+        Assert.Equal(99, after.Stock);
+    }
+
 }

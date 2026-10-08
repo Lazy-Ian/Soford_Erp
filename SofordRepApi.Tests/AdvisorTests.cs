@@ -46,7 +46,7 @@ public class AdvisorTests
     }
 
     [Fact]
-    public void WithoutApiKey_TheFeatureIsOff()
+    public async Task WithoutApiKey_TheFeatureIsOff()
     {
         var saved = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", null);
@@ -54,7 +54,7 @@ public class AdvisorTests
         {
             var advisor = new ListingAdvisor(new ConfigurationBuilder().Build(), NullLogger<ListingAdvisor>.Instance);
             Assert.False(advisor.Enabled);
-            Assert.ThrowsAsync<ListingAdvisorException>(() => advisor.SuggestAsync(Mat()));
+            await Assert.ThrowsAsync<ListingAdvisorException>(() => advisor.SuggestAsync(Mat()));
         }
         finally
         {

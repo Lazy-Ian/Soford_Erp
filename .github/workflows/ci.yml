@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Build (warnings are errors)
+        run: dotnet build SofordRepApi -c Release -warnaserror
+      - name: Test
+        run: dotnet test SofordRepApi.Tests -c Release --logger "console;verbosity=normal"
+
+  web:
+    name: Web build and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: WebSofordRep
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: WebSofordRep/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+
+  deploy-scripts:
+    name: Deploy scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: for f in deploy/*.sh deploy/backup/*.sh; do bash -n "$f"; done
+      - name: systemd units
+        run: |
+          # dotnet is not installed here; only the unit syntax is checked.
+          for f in deploy/systemd/*.service deploy/systemd/*.timer; do
+            systemd-analyze verify "$f" 2>&1 | grep -v "is not executable" | grep -v "^$" && exit 1 || true
+          done
+      - name: nginx config
+        run: |
+          sudo mkdir -p /etc/letsencrypt/live/erp.soford.cn
+          sudo openssl req -x509 -nodes -newkey rsa:2048 -subj /CN=test \
+            -keyout /etc/letsencrypt/live/erp.soford.cn/privkey.pem -out /etc/letsencrypt/live/erp.soford.cn/fullchain.pem
+          for site in http https; do
+            docker run --rm -v "$PWD/deploy/nginx/soford-erp.$site.conf:/etc/nginx/conf.d/default.conf:ro" \
+              -v /etc/letsencrypt:/etc/letsencrypt:ro nginx:1.18 nginx -t
+          done
+          # The stepnex.cn fallback entry is a location snippet; check it inside a minimal server block.
+          echo 'server { listen 80; include /etc/nginx/snippets/stepnex-erp.locations.conf; }' > "$RUNNER_TEMP/stepnex.conf"
+          docker run --rm -v "$RUNNER_TEMP/stepnex.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "$PWD/deploy/nginx/snippets:/etc/nginx/snippets:ro" nginx:1.18 nginx -t

@@ -54,12 +54,26 @@ public static class PasswordHasher
 
     public static bool Verify(string password, string stored)
     {
-        var parts = stored.Split('$');
-        if (parts.Length != 4 || parts[0] != "v1" || !int.TryParse(parts[1], out var iterations)) return false;
-        var salt = Convert.FromBase64String(parts[2]);
-        var expected = Convert.FromBase64String(parts[3]);
-        var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, expected.Length);
-        return CryptographicOperations.FixedTimeEquals(actual, expected);
+        try
+        {
+            var parts = stored.Split('$');
+            if (parts.Length != 4 || parts[0] != "v1" || !int.TryParse(parts[1], out var iterations)
+                || iterations is < 10_000 or > 1_000_000)
+            {
+                return false;
+            }
+
+            var salt = Convert.FromBase64String(parts[2]);
+            var expected = Convert.FromBase64String(parts[3]);
+            if (salt.Length < 16 || expected.Length < 16) return false;
+            var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, expected.Length);
+            return CryptographicOperations.FixedTimeEquals(actual, expected);
+        }
+        catch (FormatException)
+        {
+            // A damaged users.json entry must fail closed instead of turning a login attempt into HTTP 500.
+            return false;
+        }
     }
 
     /// <summary>Same rule as the environment admin password: at least 10 characters.</summary>
@@ -177,13 +191,24 @@ public sealed class AccessService(UserStore users, AlibabaTokenService tokens, I
         return new(id, user.DisplayName, user.Role == Roles.Admin, user.AccountIds.ToHashSet());
     }
 
+    public async Task<CurrentUser?> FindAsync(string? id)
+    {
+        if (id == CurrentUser.BuiltInAdminId) return new(id, LocalAdminAuth.Username(config, env), true, new HashSet<Guid>());
+        if (!Guid.TryParse(id, out var guid) || await users.FindAsync(guid) is not { Disabled: false } user) return null;
+        return new(id!, user.DisplayName, user.Role == Roles.Admin, user.AccountIds.ToHashSet());
+    }
+
     /// <summary>
     /// Operators see listings owned by or assigned to their accounts, plus products they created themselves.
     /// Admins see everything.
     /// </summary>
     public async Task<Func<ProductRecord, bool>> VisibleAsync(ClaimsPrincipal principal)
     {
-        var user = await CurrentAsync(principal);
+        return await VisibleAsync(await CurrentAsync(principal));
+    }
+
+    public async Task<Func<ProductRecord, bool>> VisibleAsync(CurrentUser? user)
+    {
         if (user is null) return _ => false;
         if (user.IsAdmin) return _ => true;
 

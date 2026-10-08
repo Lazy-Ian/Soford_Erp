@@ -318,7 +318,8 @@ public sealed record ProductDraft(
     decimal? WidthCm,
     decimal? HeightCm,
     string[]? Images,
-    bool AiOptimize);
+    bool AiOptimize,
+    DateTimeOffset? ExpectedUpdatedAt = null);
 
 /// <summary>Reads both the current names and the previous release's (Draft/Ready/Published) without failing.</summary>
 public sealed class PublishStateConverter : JsonConverter<PublishState>

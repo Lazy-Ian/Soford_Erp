@@ -31,6 +31,8 @@ export type ProductDraft = {
   heightCm: number | null
   images: string[]
   aiOptimize: boolean
+  /** Version loaded by the editor; updates fail with 409 if someone changed the product meanwhile. */
+  expectedUpdatedAt?: string | null
 }
 
 export type Product = ProductDraft & {
@@ -174,7 +176,30 @@ export type AlibabaApiResult = {
 export type CategoryAttribute = { id: string; name: string; required: boolean; supportCustomValue: boolean; supportMultiValue: boolean; values: string[] }
 export type CategoryAttributeSet = { categoryId: string; fetchedAt: string; attributes: CategoryAttribute[]; saleAttributes: CategoryAttribute[] }
 
-export type ImportResult = { created: number; updated: number; skipped: number; warnings: string[]; headers: string[]; unknownHeaders: string[] }
+export type ImportMode = 'upsert' | 'create-only' | 'update-only' | 'stock-price'
+export type ImportJobStatus = 'Previewed' | 'Queued' | 'Running' | 'Completed' | 'CompletedWithWarnings' | 'Failed' | 'Interrupted'
+export type ImportPreviewItem = { rowNumber: number; key: string; action: 'Create' | 'Update' | 'Skip'; fields: string[]; message?: string | null }
+export type ImportJob = {
+  id: string
+  fileName: string
+  mode: ImportMode
+  createdByName: string
+  status: ImportJobStatus
+  total: number
+  processed: number
+  created: number
+  updated: number
+  skipped: number
+  warningCount: number
+  warnings: string[]
+  headers: string[]
+  unknownHeaders: string[]
+  preview: ImportPreviewItem[]
+  message: string
+  createdAt: string
+  startedAt?: string | null
+  finishedAt?: string | null
+}
 /** `expired` marks a session that ended while the app was open: login is shown over the page so unsaved work survives. */
 export type AuthSession = { authenticated: boolean; username?: string | null; role?: 'Admin' | 'Operator' | null; canChangePassword?: boolean; expired?: boolean }
 export type AppUser = { id: string; username: string; displayName: string; role: 'Admin' | 'Operator'; accountIds: string[]; disabled: boolean; createdAt: string }
@@ -194,10 +219,18 @@ export class ApiError extends Error {
 /** Fired when any request comes back 401, so the app can return to the login screen. */
 export const UNAUTHORIZED_EVENT = 'soford:unauthorized'
 
+// Keep API requests beside the deployed frontend. At the domain root this is
+// /api; when the same build is mounted at /erp/, requests become /erp/api.
+const deploymentBase = new URL(import.meta.env.BASE_URL, window.location.href).pathname.replace(/\/$/, '')
+
+export function apiUrl(url: string) {
+  return deploymentBase && url.startsWith('/api') ? `${deploymentBase}${url}` : url
+}
+
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
-    response = await fetch(url, { credentials: 'same-origin', ...init })
+    response = await fetch(apiUrl(url), { credentials: 'same-origin', ...init })
   } catch {
     throw new ApiError(0, '无法连接服务器，请确认 API 已启动。')
   }

@@ -4,7 +4,7 @@ import {
   Plus, RefreshCw, Rocket, Search, Tags, Trash2, Upload, Warehouse, DollarSign,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { accountOf, api, errorText, post, UNAUTHORIZED_EVENT, type AlibabaAccount, type BatchResult, type ImportResult, type JobKind, type Product, type ProductDraft, type PublishJob, type PublishState, type PullResult } from '../api'
+import { accountOf, api, apiUrl, errorText, post, UNAUTHORIZED_EVENT, type AlibabaAccount, type BatchResult, type ImportJob, type ImportMode, type JobKind, type Product, type ProductDraft, type PublishJob, type PublishState, type PullResult } from '../api'
 import { BatchResultDialog, Modal, Pagination, Pill, Spinner } from '../components/ui'
 import { hashFilter, useApp } from '../context'
 import { useInitialLoad } from '../hooks'
@@ -24,6 +24,18 @@ const filters: { key: Filter; label: string }[] = [
   { key: 'incomplete', label: '新品待完善' },
   { key: 'ready', label: '新品可发布' },
 ]
+
+const importModeLabel: Record<ImportMode, string> = {
+  upsert: '新增并更新',
+  'create-only': '仅新增',
+  'update-only': '仅更新',
+  'stock-price': '只更新库存价格',
+}
+
+const importStatusLabel: Record<ImportJob['status'], string> = {
+  Previewed: '等待确认', Queued: '排队中', Running: '执行中', Completed: '已完成',
+  CompletedWithWarnings: '完成但有警告', Failed: '失败', Interrupted: '已中断',
+}
 
 const hasBlockers = (item: Product) => item.qualityIssues.some((x) => x.severity === 'Blocker')
 
@@ -58,7 +70,9 @@ export function ProductsPage() {
   const [editing, setEditing] = useState<Product | 'new' | null>(null)
   const [issuesOf, setIssuesOf] = useState<Product | null>(null)
   const [batch, setBatch] = useState<{ title: string; result: BatchResult } | null>(null)
-  const [importResult, setImportResult] = useState<ImportResult | null>(null)
+  const [importJob, setImportJob] = useState<ImportJob | null>(null)
+  const [importMode, setImportMode] = useState<ImportMode>('upsert')
+  const [importPollTick, setImportPollTick] = useState(0)
   const [job, setJob] = useState<PublishJob | null>(null)
   const [pollTick, setPollTick] = useState(0)
   const [pullResult, setPullResult] = useState<PullResult | null>(null)
@@ -98,6 +112,23 @@ export function ProductsPage() {
     }, 1500)
     return () => window.clearTimeout(timer)
   }, [job, pollTick, load, notify])
+
+  useEffect(() => {
+    if (!importJob || !['Queued', 'Running'].includes(importJob.status)) return
+    const timer = window.setTimeout(async () => {
+      try {
+        const next = await api<ImportJob>(`/api/catalog/import-jobs/${importJob.id}`)
+        const finished = !['Queued', 'Running'].includes(next.status)
+        setImportJob(next)
+        if (finished) await load()
+        else setImportPollTick((tick) => tick + 1)
+      } catch (err) {
+        notify('error', errorText(err, '查询导入进度失败，稍后重试'))
+        setImportPollTick((tick) => tick + 1)
+      }
+    }, 1200)
+    return () => window.clearTimeout(timer)
+  }, [importJob, importPollTick, load, notify])
 
   const filtered = useMemo(() => {
     const key = query.trim().toLowerCase()
@@ -195,15 +226,20 @@ export function ProductsPage() {
     run('import', async () => {
       const data = new FormData()
       data.append('file', file)
-      const result = await api<ImportResult>('/api/catalog/import', { method: 'POST', body: data })
-      setImportResult(result)
-      await load()
+      data.append('mode', importMode)
+      setImportJob(await api<ImportJob>('/api/catalog/import/preview', { method: 'POST', body: data }))
+    })
+
+  const commitImport = () =>
+    run('import-commit', async () => {
+      if (!importJob) return
+      setImportJob(await post<ImportJob>(`/api/catalog/import-jobs/${importJob.id}/commit`))
     })
 
   const saveProduct = (draft: ProductDraft) =>
     run('save', async () => {
       const saved = editing && editing !== 'new'
-        ? await post<Product>(`/api/catalog/products/${editing.id}`, draft, 'PUT')
+        ? await post<Product>(`/api/catalog/products/${editing.id}`, { ...draft, expectedUpdatedAt: editing.updatedAt }, 'PUT')
         : await post<Product>('/api/catalog/products', draft)
       const blockers = saved.qualityIssues.filter((x) => x.severity === 'Blocker').length
       notify(blockers ? 'info' : 'success', blockers ? `${saved.sku} 已保存，还有 ${blockers} 个阻断问题需处理。` : `${saved.sku} 已保存，可以发布。`)
@@ -284,7 +320,7 @@ export function ProductsPage() {
   const exportCsv = () =>
     run('export', async () => {
       // POST keeps large selections out of the URL (nginx rejects very long query strings).
-      const response = await fetch('/api/catalog/export/products.csv', {
+      const response = await fetch(apiUrl('/api/catalog/export/products.csv'), {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -380,6 +416,12 @@ export function ProductsPage() {
             </button>
           )}
           <button type="button" onClick={() => downloadUrl('/api/catalog/import/template.xlsx')}><Download size={16} /> 模板</button>
+          <select value={importMode} onChange={(event) => setImportMode(event.target.value as ImportMode)} disabled={busy === 'import'} aria-label="导入模式" title="选择表格导入时允许执行的操作">
+            <option value="upsert">新增并更新</option>
+            <option value="create-only">仅新增</option>
+            <option value="update-only">仅更新</option>
+            <option value="stock-price">只更新库存价格</option>
+          </select>
           <button type="button" className="primary" onClick={() => fileInput.current?.click()} disabled={busy === 'import'} title="支持 .xlsx / .csv，也可以把文件拖到这里">
             {busy === 'import' ? <Spinner /> : <Upload size={16} />} 导入
           </button>
@@ -592,13 +634,64 @@ export function ProductsPage() {
         </Modal>
       )}
 
-      {importResult && (
-        <Modal title="导入完成" subtitle={`新增 ${importResult.created}，更新 ${importResult.updated}，跳过 ${importResult.skipped}`} onClose={() => setImportResult(null)}>
-          {importResult.unknownHeaders.length > 0 && <p className="warn">未识别的列（已忽略）：{importResult.unknownHeaders.join('、')}</p>}
-          {importResult.warnings.length > 0
-            ? <ul className="issues">{importResult.warnings.map((warning, index) => <li key={index} className="warning">{warning}</li>)}</ul>
-            : <p className="good">没有警告。</p>}
-          <p className="muted">导入后已自动质检，可在列表「质检」列查看每个商品的问题。</p>
+      {importJob && (
+        <Modal
+          title={importJob.status === 'Previewed' ? '确认表格导入' : '表格导入任务'}
+          subtitle={`${importJob.fileName} · ${importModeLabel[importJob.mode]}`}
+          onClose={() => setImportJob(null)}
+          wide
+          footer={
+            <>
+              {importJob.warningCount > 0 && <button type="button" onClick={() => downloadUrl(`/api/catalog/import-jobs/${importJob.id}/errors.xlsx`)}><Download size={16} /> 错误明细</button>}
+              <button type="button" onClick={() => setImportJob(null)}>关闭</button>
+              {['Previewed', 'Interrupted', 'Failed'].includes(importJob.status) && (
+                <button type="button" className="primary" disabled={busy === 'import-commit'} onClick={() => void commitImport()}>
+                  {busy === 'import-commit' ? <Spinner /> : <Upload size={16} />} {importJob.status === 'Previewed' ? '确认并后台导入' : '重新执行'}
+                </button>
+              )}
+            </>
+          }
+        >
+          <div className="import-summary">
+            <Pill tone={importJob.status === 'Failed' || importJob.status === 'Interrupted' ? 'bad' : importJob.status === 'CompletedWithWarnings' ? 'warn' : 'good'}>{importStatusLabel[importJob.status]}</Pill>
+            <span>共 {importJob.total} 行</span>
+            <span>新增 {importJob.created}</span>
+            <span>更新 {importJob.updated}</span>
+            <span>跳过 {importJob.skipped}</span>
+            <span>警告 {importJob.warningCount}</span>
+          </div>
+          {['Queued', 'Running'].includes(importJob.status) && (
+            <div className="progress"><div style={{ width: `${importJob.total ? (importJob.processed / importJob.total) * 100 : 5}%` }} /></div>
+          )}
+          {importJob.message && <p className="muted">{importJob.message}</p>}
+          {importJob.unknownHeaders.length > 0 && <p className="warn">未识别的列（将忽略）：{importJob.unknownHeaders.join('、')}</p>}
+          {importJob.status === 'Previewed' && (
+            <>
+              <p className="muted">以下是预检结果，尚未写入任何商品。确认后任务将在后台执行并自动质检。</p>
+              <div className="table-wrap flat import-preview">
+                <table>
+                  <thead><tr><th>行</th><th>商品</th><th>操作</th><th>变化字段 / 原因</th></tr></thead>
+                  <tbody>
+                    {importJob.preview.map((item) => (
+                      <tr key={`${item.rowNumber}-${item.key}`}>
+                        <td>{item.rowNumber}</td>
+                        <td>{item.key}</td>
+                        <td><Pill tone={item.action === 'Skip' ? 'warn' : item.action === 'Create' ? 'good' : 'info'}>{item.action === 'Create' ? '新增' : item.action === 'Update' ? '更新' : '跳过'}</Pill></td>
+                        <td>{item.message || (item.fields.length ? item.fields.join('、') : '内容相同')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {importJob.preview.length < importJob.total && <p className="muted">这里只展示前 {importJob.preview.length} 行预览。</p>}
+            </>
+          )}
+          {importJob.warnings.length > 0
+            ? <ul className="issues">{importJob.warnings.slice(0, 100).map((warning, index) => <li key={index} className="warning">{warning}</li>)}</ul>
+            : importJob.status === 'Previewed' && <p className="good">预检没有发现警告。</p>}
+          {importJob.status === 'Completed' || importJob.status === 'CompletedWithWarnings'
+            ? <p className="muted">导入完成并已自动质检，商品列表已经刷新。</p>
+            : null}
         </Modal>
       )}
 

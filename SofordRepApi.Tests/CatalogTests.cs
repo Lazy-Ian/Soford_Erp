@@ -139,7 +139,7 @@ public class CatalogTests
         Assert.Equal("音箱", draft.Title);
         Assert.Equal(50, draft.MinimumOrderQuantity);
         Assert.Equal(10, draft.LeadTimeDays);
-        Assert.Equal(["https://x/m.jpg", "https://x/d.jpg"], draft.Images);
+        Assert.Equal(["https://x/m.jpg", "https://x/d.jpg"], draft.Images!);
     }
 
     [Fact]

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,6 +31,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddProblemDetails();
+builder.Services.Configure<FormOptions>(options => options.MultipartBodyLengthLimit = 21L * 1024 * 1024);
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
@@ -109,6 +111,10 @@ builder.Services.AddSingleton<CategoryAttributeService>();
 builder.Services.AddSingleton<ProductRepository>();
 builder.Services.AddSingleton<ProductQualityService>();
 builder.Services.AddSingleton<ProductImportService>();
+builder.Services.AddSingleton<ProductImportPlanner>();
+builder.Services.AddSingleton<ImportJobStore>();
+builder.Services.AddSingleton<ImportQueue>();
+builder.Services.AddHostedService<ImportWorker>();
 builder.Services.AddSingleton<ExportService>();
 builder.Services.AddSingleton<ProductLocks>();
 builder.Services.AddSingleton<ProductOperations>();
@@ -131,14 +137,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseExceptionHandler();
 app.UseForwardedHeaders();
+app.UseExceptionHandler();
 if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
 
 app.UseCors("web");
+app.UseMiddleware<BrowserRequestOriginGuard>();
 app.UseAuthentication();
 app.UseAuthorization();
 

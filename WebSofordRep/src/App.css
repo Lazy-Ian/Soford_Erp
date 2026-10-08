@@ -66,7 +66,12 @@
 .summary-items li > div { display: grid; min-width: 0; }
 .summary-items img, .summary-items .img-placeholder { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; }
 .table-wrap.flat { border: 0; padding: 0; }
+/* Small tables (overview, users, audit) do not need the product list's width; they scroll sideways on phones. */
+.table-wrap.flat table { min-width: 560px; table-layout: auto; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.import-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-bottom: 12px; }
+.import-preview { max-height: 360px; overflow: auto; margin: 12px 0; }
+.import-preview table { min-width: 720px; }
 .account-picks { display: grid; gap: 6px; margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
 .account-picks .muted { margin-left: 6px; font-size: 12px; }
 @media (max-width: 640px) { .form-grid { grid-template-columns: 1fr; } }
@@ -338,12 +343,14 @@ pre.code.tall { max-height: 560px; }
   .toolbar { grid-template-columns: 1fr; }
   .actions { justify-content: flex-start; }
   .metrics { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
-  .tabs { overflow-x: auto; }
+  /* Wrap instead of scrolling: a scrolling nav would also clip the 「高级」 dropdown. */
+  .tabs { flex-wrap: wrap; }
 }
 
 @media (max-width: 760px) {
-  .topbar { flex-wrap: wrap; padding: 10px 16px; }
-  .tabs { order: 3; width: 100%; margin-left: 0; }
+  /* Three rows tall on a phone: scrolling away with the page beats covering a third of the screen. */
+  .topbar { flex-wrap: wrap; padding: 10px 16px; position: static; }
+  .tabs { order: 3; flex: 1 1 100%; margin-left: 0; }
   .page { padding: 14px 16px 32px; }
   .metrics { grid-template-columns: repeat(2, minmax(100px, 1fr)); }
   .grid.four, .grid.three, .steps { grid-template-columns: 1fr; }

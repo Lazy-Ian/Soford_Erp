@@ -91,6 +91,71 @@ public class EndpointTests : IClassFixture<ErpFactory>
     }
 
     [Fact]
+    public async Task CrossSiteWritesAreRejectedButConfiguredFrontendIsAllowed()
+    {
+        var blocked = _factory.CreateClient();
+        blocked.DefaultRequestHeaders.Add("Origin", "https://attacker.example");
+        var denied = await blocked.PostAsJsonAsync("/api/auth/login", new { username = "boss", password = ErpFactory.AdminPassword, remember = false });
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var allowed = _factory.CreateClient();
+        allowed.DefaultRequestHeaders.Add("Origin", "http://localhost:5173");
+        var accepted = await allowed.PostAsJsonAsync("/api/auth/login", new { username = "boss", password = ErpFactory.AdminPassword, remember = false });
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+    }
+
+    [Fact]
+    public async Task ImageUploadRejectsSpoofedContentTypeBeforeCallingAlibaba()
+    {
+        var admin = await LoginAsync("boss", ErpFactory.AdminPassword);
+        using var form = new MultipartFormDataContent();
+        var fake = new ByteArrayContent("this is not a png"u8.ToArray());
+        fake.Headers.ContentType = new("image/png");
+        form.Add(fake, "file", "fake.png");
+
+        var response = await admin.PostAsync("/api/integrations/alibaba/images/upload", form);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("图片内容无效", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task ImportPreviewWritesNothingUntilConfirmedThenRunsInBackground()
+    {
+        var admin = await LoginAsync("boss", ErpFactory.AdminPassword);
+        var sku = "IMPORT-" + Guid.NewGuid().ToString("N")[..8];
+        using var form = new MultipartFormDataContent();
+        form.Add(new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes($"Sku,Title,Price,Stock,Unknown\n{sku},Imported,12.5,20,x\n")), "file", "products.csv");
+        form.Add(new StringContent(ImportModes.Upsert), "mode");
+
+        var previewResponse = await admin.PostAsync("/api/catalog/import/preview", form);
+        Assert.Equal(HttpStatusCode.OK, previewResponse.StatusCode);
+        var preview = (await previewResponse.Content.ReadFromJsonAsync<JsonElement>())!;
+        var id = preview.GetProperty("id").GetGuid();
+        Assert.Equal("Previewed", preview.GetProperty("status").GetString());
+        Assert.Equal(1, preview.GetProperty("created").GetInt32());
+        Assert.DoesNotContain(await _factory.Services.GetRequiredService<ProductRepository>().GetAllAsync(), x => x.Sku == sku);
+
+        var commit = await admin.PostAsync($"/api/catalog/import-jobs/{id}/commit", null);
+        Assert.Equal(HttpStatusCode.Accepted, commit.StatusCode);
+
+        JsonElement finished = default;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            finished = (await admin.GetFromJsonAsync<JsonElement>($"/api/catalog/import-jobs/{id}"))!;
+            if (finished.GetProperty("status").GetString() is "Completed" or "CompletedWithWarnings") break;
+            await Task.Delay(25);
+        }
+
+        Assert.Contains(finished.GetProperty("status").GetString(), new[] { "Completed", "CompletedWithWarnings" });
+        Assert.Contains(await _factory.Services.GetRequiredService<ProductRepository>().GetAllAsync(), x => x.Sku == sku && x.Stock == 20);
+
+        var report = await admin.GetAsync($"/api/catalog/import-jobs/{id}/errors.xlsx");
+        Assert.Equal(HttpStatusCode.OK, report.StatusCode);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", report.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
     public async Task Operator_SeesAndChangesOnlyTheirAccountsProducts()
     {
         var (_, op, mine, foreign, otherAccount, _) = await SeedAsync();

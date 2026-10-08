@@ -8,8 +8,22 @@ public sealed class AlibabaCatalogSync(AlibabaClient alibaba, ProductRepository 
 {
     public const int PageSize = 20;
     private const int MaxPages = 100;
+    private readonly SemaphoreSlim _pullLock = new(1, 1);
 
     public async Task<(PullResult? Result, AlibabaApiResult? Error)> PullAsync(CancellationToken cancellationToken = default)
+    {
+        await _pullLock.WaitAsync(cancellationToken);
+        try
+        {
+            return await PullUnsafeAsync(cancellationToken);
+        }
+        finally
+        {
+            _pullLock.Release();
+        }
+    }
+
+    private async Task<(PullResult? Result, AlibabaApiResult? Error)> PullUnsafeAsync(CancellationToken cancellationToken)
     {
         var snapshotAt = time.GetUtcNow();
         var remote = new List<ProductRecord>();

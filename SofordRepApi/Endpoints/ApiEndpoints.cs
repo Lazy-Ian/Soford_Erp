@@ -27,6 +27,7 @@ public sealed record PasswordChangeRequest(string? Current, string? Next);
 public static class ApiEndpoints
 {
     private const long MaxImageBytes = 10 * 1024 * 1024;
+    private const long MaxImportBytes = 20 * 1024 * 1024;
 
     /// <summary>Store-wide settings, accounts, users and raw API access.</summary>
     public const string AdminPolicy = "admin";
@@ -271,10 +272,12 @@ public static class ApiEndpoints
 
             using var memory = new MemoryStream();
             await file.CopyToAsync(memory);
+            var bytes = memory.ToArray();
+            if (!IsSupportedImage(bytes, file.ContentType)) return Problem("图片内容无效", "仅支持真实的 JPEG、PNG、GIF 或 WebP 图片。");
             var payload = new Dictionary<string, object?> { ["file_name"] = file.FileName };
             if (!string.IsNullOrWhiteSpace(groupId)) payload["group_id"] = groupId.Trim();
 
-            var result = await client.CallAsync("image.upload", payload, new AlibabaFile("image_bytes", file.FileName, file.ContentType, memory.ToArray()));
+            var result = await client.CallAsync("image.upload", payload, new AlibabaFile("image_bytes", file.FileName, file.ContentType, bytes));
             if (!result.Success) return Problem("图片上传失败", AlibabaErrors.Explain(result));
 
             var url = AlibabaResponseParser.ScalarText(AlibabaResponseParser.Find(result.Json!.Value, "photobank_url"));
@@ -379,7 +382,7 @@ public static class ApiEndpoints
             await quality.ApplyAsync(preview);
             try
             {
-                var updated = await repo.UpdateAsync(id, p =>
+                var updated = await repo.UpdateAsync(id, draft.ExpectedUpdatedAt, p =>
                 {
                     p.ApplyDraft(draft);
                     p.ContentUpdatedAt = DateTimeOffset.UtcNow;
@@ -393,6 +396,10 @@ public static class ApiEndpoints
             catch (SkuConflictException ex)
             {
                 return Problem("SKU 重复", ex.Message, StatusCodes.Status409Conflict);
+            }
+            catch (ProductConcurrencyException ex)
+            {
+                return Problem("商品已发生变化", ex.Message, StatusCodes.Status409Conflict);
             }
         });
 
@@ -501,9 +508,13 @@ public static class ApiEndpoints
         catalog.MapGet("/import/template.xlsx", () =>
             Results.File(ProductImportService.BuildTemplate(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "soford-商品导入模板.xlsx"));
 
-        catalog.MapPost("/import", async ([FromForm] IFormFile file, ProductImportService importer, ProductRepository repo, ProductQualityService quality, ClaimsPrincipal principal, AccessService access, AuditLog audit) =>
+        catalog.MapPost("/import/preview", async ([FromForm] IFormFile file, [FromForm] string? mode, ProductImportService importer, ProductImportPlanner planner,
+            ImportJobStore jobs, ClaimsPrincipal principal, AccessService access, TimeProvider time) =>
         {
             if (file.Length == 0) return Problem("上传的文件为空");
+            if (file.Length > MaxImportBytes) return Problem("导入文件过大", "一次上传不能超过 20MB。", StatusCodes.Status413PayloadTooLarge);
+            mode = string.IsNullOrWhiteSpace(mode) ? ImportModes.Upsert : mode.Trim().ToLowerInvariant();
+            if (!ImportModes.IsValid(mode)) return Problem("导入模式无效");
 
             ImportParseResult parsed;
             try
@@ -520,14 +531,82 @@ public static class ApiEndpoints
                 return Problem("导入失败", $"无法读取文件：{ex.Message}");
             }
 
-            var lookup = await quality.LoadCategoryLookupAsync();
-            var unmatched = new List<string>();
             var user = await access.CurrentAsync(principal);
-            var (created, updated) = await repo.ImportAsync(parsed.Rows, p => ProductQualityService.Apply(p, lookup(p.CategoryId)), unmatched,
-                await access.VisibleAsync(principal), user?.Id);
-            await audit.RecordAsync(user, "导入表格", $"{file.FileName}：新增 {created}，更新 {updated}", created + updated);
-            return Results.Ok(new ImportResult(created, updated, parsed.Skipped + unmatched.Count, [.. unmatched, .. parsed.Warnings], parsed.Headers, parsed.UnknownHeaders));
+            if (user is null) return Results.Unauthorized();
+            var plan = await planner.PlanAsync(parsed, mode, await access.VisibleAsync(user), user.Id);
+            var job = new ImportJobRecord
+            {
+                Id = Guid.NewGuid(),
+                FileName = Path.GetFileName(file.FileName),
+                Mode = mode,
+                CreatedBy = user.Id,
+                CreatedByName = user.Name,
+                Total = parsed.Rows.Count + parsed.Skipped,
+                Created = plan.Created,
+                Updated = plan.Updated,
+                Skipped = plan.Skipped,
+                WarningCount = plan.Warnings.Count,
+                Warnings = plan.Warnings.Take(200).ToArray(),
+                Headers = parsed.Headers,
+                UnknownHeaders = parsed.UnknownHeaders,
+                Preview = plan.Preview,
+                CreatedAt = time.GetUtcNow()
+            };
+            var payload = new ImportJobPayload
+            {
+                Rows = parsed.Rows.Select(x => new ImportPayloadRow(x.RowNumber, x.Draft, x.Present.ToArray(), x.RemoteProductId)).ToList(),
+                ParsedSkipped = parsed.Skipped,
+                ParseWarnings = parsed.Warnings,
+                PlanWarnings = plan.Warnings
+            };
+            await jobs.SaveNewAsync(job, payload);
+            return Results.Ok(job);
         }).DisableAntiforgery();
+
+        catalog.MapPost("/import-jobs/{id:guid}/commit", async (Guid id, ImportJobStore jobs, ImportQueue queue, ClaimsPrincipal principal, AccessService access, TimeProvider time) =>
+        {
+            var user = await access.CurrentAsync(principal);
+            var job = await jobs.GetAsync(id);
+            if (job is null || (user is not { IsAdmin: true } && job.CreatedBy != user?.Id)) return Results.NotFound();
+            if (time.GetUtcNow() - job.CreatedAt > TimeSpan.FromDays(1)) return Problem("预检已过期", "请重新上传文件预检。", StatusCodes.Status410Gone);
+
+            var queued = false;
+            var updated = await jobs.UpdateAsync(id, current =>
+            {
+                if (current.Status is not (ImportJobStatus.Previewed or ImportJobStatus.Interrupted or ImportJobStatus.Failed)) return;
+                current.Status = ImportJobStatus.Queued;
+                current.Processed = 0;
+                current.Message = "排队中";
+                current.StartedAt = null;
+                current.FinishedAt = null;
+                queued = true;
+            });
+            if (!queued || updated is null) return Problem("不能重复提交", "该导入任务已经排队、执行或完成。", StatusCodes.Status409Conflict);
+            await queue.EnqueueAsync(id);
+            return Results.Accepted($"/api/catalog/import-jobs/{id}", updated);
+        });
+
+        catalog.MapGet("/import-jobs", async (ImportJobStore jobs, ClaimsPrincipal principal, AccessService access, int take = 50) =>
+        {
+            var user = await access.CurrentAsync(principal);
+            return Results.Ok((await jobs.GetLatestAsync(Math.Clamp(take, 1, 100))).Where(x => user is { IsAdmin: true } || x.CreatedBy == user?.Id));
+        });
+
+        catalog.MapGet("/import-jobs/{id:guid}", async (Guid id, ImportJobStore jobs, ClaimsPrincipal principal, AccessService access) =>
+        {
+            var user = await access.CurrentAsync(principal);
+            return await jobs.GetAsync(id) is { } job && (user is { IsAdmin: true } || job.CreatedBy == user?.Id) ? Results.Ok(job) : Results.NotFound();
+        });
+
+        catalog.MapGet("/import-jobs/{id:guid}/errors.xlsx", async (Guid id, ImportJobStore jobs, ClaimsPrincipal principal, AccessService access) =>
+        {
+            var user = await access.CurrentAsync(principal);
+            var job = await jobs.GetAsync(id);
+            if (job is null || (user is not { IsAdmin: true } && job.CreatedBy != user?.Id)) return Results.NotFound();
+            var payload = await jobs.GetPayloadAsync(id);
+            if (payload is null) return Results.NotFound();
+            return Results.File(jobs.BuildErrorWorkbook(job, payload), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"import-errors-{id:N}.xlsx");
+        });
 
         catalog.MapPost("/quality-check", async (IdsRequest request, ProductRepository repo, ProductQualityService quality, ClaimsPrincipal principal, AccessService access) =>
         {
@@ -647,6 +726,22 @@ public static class ApiEndpoints
     {
         product.Description = "";
         return product;
+    }
+
+    private static bool IsSupportedImage(ReadOnlySpan<byte> bytes, string contentType)
+    {
+        var jpeg = bytes.Length >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff;
+        var png = bytes.StartsWith(new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a });
+        var gif = bytes.StartsWith("GIF87a"u8) || bytes.StartsWith("GIF89a"u8);
+        var webp = bytes.Length >= 12 && bytes[..4].SequenceEqual("RIFF"u8) && bytes.Slice(8, 4).SequenceEqual("WEBP"u8);
+        return contentType.ToLowerInvariant() switch
+        {
+            "image/jpeg" or "image/jpg" => jpeg,
+            "image/png" => png,
+            "image/gif" => gif,
+            "image/webp" => webp,
+            _ => false
+        };
     }
 
     private static IResult CsvFile(ExportService export, IEnumerable<ProductRecord> products) =>

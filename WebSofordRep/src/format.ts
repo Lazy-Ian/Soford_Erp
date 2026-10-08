@@ -1,4 +1,4 @@
-import type { PublishJobStatus, PublishState } from './api'
+import { apiUrl, type PublishJobStatus, type PublishState } from './api'
 
 export const publishStateLabel: Record<PublishState, string> = {
   NotPublished: '未发布',
@@ -70,7 +70,7 @@ export function splitList(value: string) {
 
 export function downloadUrl(url: string) {
   const link = document.createElement('a')
-  link.href = url
+  link.href = apiUrl(url)
   link.rel = 'noopener'
   document.body.appendChild(link)
   link.click()

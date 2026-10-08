@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -14,6 +15,10 @@ public sealed record ImportResult(int Created, int Updated, int Skipped, List<st
 
 public sealed partial class ProductImportService
 {
+    public const int MaxImportRows = 20_000;
+    public const int MaxImportColumns = 100;
+    private const long MaxSpreadsheetUncompressedBytes = 100L * 1024 * 1024;
+    private const int MaxSpreadsheetEntries = 2_000;
     /// <summary>Canonical field → accepted header aliases. Headers are normalized (lower case, no spaces/punctuation, parentheses removed).</summary>
     public static readonly IReadOnlyDictionary<string, string[]> Fields = new Dictionary<string, string[]>
     {
@@ -272,6 +277,7 @@ public sealed partial class ProductImportService
 
     private static List<(int, string[])> ReadXlsx(Stream stream)
     {
+        ValidateXlsxArchive(stream);
         using var workbook = new XLWorkbook(stream);
         var sheet = workbook.Worksheets.First();
         var headerRow = sheet.FirstRowUsed();
@@ -279,6 +285,8 @@ public sealed partial class ProductImportService
 
         var lastColumn = headerRow.LastCellUsed()?.Address.ColumnNumber ?? 0;
         var lastRow = sheet.LastRowUsed()?.RowNumber() ?? 0;
+        if (lastColumn > MaxImportColumns) throw new ImportFormatException($"表格列数不能超过 {MaxImportColumns} 列。");
+        if (lastRow - headerRow.RowNumber() > MaxImportRows) throw new ImportFormatException($"一次最多导入 {MaxImportRows} 行商品。");
         var table = new List<(int, string[])>();
         for (var rowNumber = headerRow.RowNumber(); rowNumber <= lastRow; rowNumber++)
         {
@@ -287,6 +295,22 @@ public sealed partial class ProductImportService
         }
 
         return table;
+    }
+
+    private static void ValidateXlsxArchive(Stream stream)
+    {
+        if (!stream.CanSeek) throw new ImportFormatException("无法读取不可定位的 XLSX 文件流。");
+        stream.Position = 0;
+        using (var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true))
+        {
+            if (archive.Entries.Count > MaxSpreadsheetEntries
+                || archive.Entries.Sum(entry => entry.Length) > MaxSpreadsheetUncompressedBytes)
+            {
+                throw new ImportFormatException("XLSX 解压后的内容过大，已拒绝读取。");
+            }
+        }
+
+        stream.Position = 0;
     }
 
     private static string CellText(IXLCell cell)
@@ -340,7 +364,9 @@ public sealed partial class ProductImportService
                 case '\r': break;
                 case '\n':
                     fields.Add(current.ToString()); current.Clear();
+                    if (fields.Count > MaxImportColumns) throw new ImportFormatException($"CSV 列数不能超过 {MaxImportColumns} 列。");
                     rows.Add((rowStart, fields.ToArray())); fields.Clear();
+                    if (rows.Count > MaxImportRows + 1) throw new ImportFormatException($"一次最多导入 {MaxImportRows} 行商品。");
                     line++; rowStart = line;
                     break;
                 default: current.Append(c); break;
@@ -350,7 +376,9 @@ public sealed partial class ProductImportService
         if (current.Length > 0 || fields.Count > 0)
         {
             fields.Add(current.ToString());
+            if (fields.Count > MaxImportColumns) throw new ImportFormatException($"CSV 列数不能超过 {MaxImportColumns} 列。");
             rows.Add((rowStart, fields.ToArray()));
+            if (rows.Count > MaxImportRows + 1) throw new ImportFormatException($"一次最多导入 {MaxImportRows} 行商品。");
         }
 
         return rows;
