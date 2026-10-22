@@ -1,15 +1,28 @@
-// Contact details shown across the site. Replace the placeholders before going live.
+// Contact details shown across the site. Empty optional fields are hidden (see data-site-optional).
+// Do not ship placeholder phones/numbers — fill from docs/06-官网上线资料清单.md before go-live.
 const SITE = {
   company: "Soford",
-  email: "sales@soford.cn", // TODO: confirm the real sales inbox
-  phone: "+86 000 0000 0000", // TODO
+  email: "sales@soford.cn", // confirm with business before treating as canonical
+  phone: "", // e.g. "+86 532 …"; empty hides phone links
   whatsapp: "", // digits only with country code, e.g. "8613800000000"; empty hides the button
-  address: "Shandong, China", // TODO: full factory address
+  address: "Shandong, China",
   alibabaStore: "", // e.g. "https://soford.en.alibaba.com"; empty hides the link
   showPrices: true,
+  // When false, homepage softens unverified SLA copy (24h reply etc.).
+  claimsVerified: false,
   inquiryEndpoint: ["localhost", "127.0.0.1"].includes(location.hostname)
     ? "http://localhost:5153/public/inquiries" : "/public/inquiries",
 };
+
+/** Reject known placeholders so they never render as real contact details. */
+function siteDisplayValue(key, value) {
+  if (value == null) return "";
+  const text = String(value).trim();
+  if (!text) return "";
+  if (key === "phone" && /(?:^|\s)0{3,}[\s-]*0{3,}/.test(text)) return "";
+  if (key === "whatsapp" && /^0+$/.test(text)) return "";
+  return text;
+}
 
 const CATEGORIES = [
   {
@@ -156,9 +169,9 @@ nav?.addEventListener("click", (e) => {
 
 document.querySelectorAll("[data-site]").forEach((el) => {
   const key = el.dataset.site;
-  const value = SITE[key];
+  const value = siteDisplayValue(key, SITE[key]);
   if (!value) {
-    el.closest("[data-site-optional]")?.remove();
+    (el.closest("[data-site-optional]") ?? el.closest("li") ?? el).remove();
     return;
   }
   if (key === "email") el.href = `mailto:${value}`;
@@ -171,6 +184,11 @@ document.querySelectorAll("[data-year]").forEach((el) => (el.textContent = new D
 document.querySelectorAll("[data-footer-cats]").forEach((ul) => {
   ul.innerHTML = CATEGORIES.map((c) => `<li><a href="products.html?cat=${c.id}">${c.name}</a></li>`).join("");
 });
+if (!SITE.claimsVerified) {
+  document.querySelectorAll("[data-claim='reply-sla']").forEach((el) => {
+    el.textContent = "Get a quote — we reply as soon as we can.";
+  });
+}
 
 /* ---------- Home page ---------- */
 

@@ -61,10 +61,21 @@ jobs:
         run: for f in deploy/*.sh deploy/backup/*.sh; do bash -n "$f"; done
       - name: systemd units
         run: |
-          # dotnet is not installed here; only the unit syntax is checked.
+          # Syntax-check our units only. Runner images (e.g. ubuntu-26.04) emit noise from
+          # unrelated system units (CPUAccounting= removed); ignore those lines.
+          failed=0
           for f in deploy/systemd/*.service deploy/systemd/*.timer; do
-            systemd-analyze verify "$f" 2>&1 | grep -v "is not executable" | grep -v "^$" && exit 1 || true
+            out=$(systemd-analyze verify "$f" 2>&1 || true)
+            bad=$(printf '%s\n' "$out" \
+              | grep -F "$f" \
+              | grep -viE 'is not executable|^$' \
+              || true)
+            if [ -n "$bad" ]; then
+              echo "$bad"
+              failed=1
+            fi
           done
+          exit "$failed"
       - name: nginx config
         run: |
           sudo mkdir -p /etc/letsencrypt/live/erp.soford.cn

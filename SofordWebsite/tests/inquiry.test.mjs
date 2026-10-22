@@ -28,6 +28,19 @@ function setup(fetch) {
   return { form, button, note, submit: () => submit({ preventDefault() {} }), resets: () => resetCount };
 }
 
+test("rejects placeholder phone numbers used as contact details", () => {
+  const context = vm.createContext({
+    window: {}, location: { hostname: "example.com", href: "https://example.com/", hash: "" },
+    document: { createElement: () => ({ addEventListener() {} }), body: { dataset: {}, append() {} },
+      addEventListener() {}, querySelector: () => null, querySelectorAll: () => [] },
+    addEventListener() {},
+  });
+  vm.runInContext(source, context);
+  assert.equal(context.siteDisplayValue("phone", "+86 000 0000 0000"), "");
+  assert.equal(context.siteDisplayValue("phone", "+86 532 1234 5678"), "+86 532 1234 5678");
+  assert.equal(context.siteDisplayValue("email", "sales@soford.cn"), "sales@soford.cn");
+});
+
 test("submits a product inquiry once while busy and resets only after acknowledged success", async () => {
   let resolve;
   const requests = [];
