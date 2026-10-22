@@ -13,7 +13,7 @@ export type AppContextValue = {
   user: { name: string; isAdmin: boolean } | null
 }
 
-export type TabKey = 'overview' | 'products' | 'jobs' | 'connection' | 'workbench' | 'logs' | 'users' | 'audit'
+export type TabKey = 'overview' | 'products' | 'jobs' | 'connection' | 'workbench' | 'logs' | 'users' | 'audit' | 'inquiries'
 
 /** The hash is "#tab" or "#tab/filter". */
 export const hashFilter = () => window.location.hash.replace('#', '').split('/')[1] ?? ''

@@ -205,7 +205,28 @@ export type AuthSession = { authenticated: boolean; username?: string | null; ro
 export type AppUser = { id: string; username: string; displayName: string; role: 'Admin' | 'Operator'; accountIds: string[]; disabled: boolean; createdAt: string }
 export type ListingSuggestion = { title: string; keywords: string[]; notes: string }
 export type Features = { aiSuggestions: boolean }
+export type InquiryStatus = 'New' | 'Replied' | 'Closed' | 'Spam'
+export type Inquiry = {
+  id: string
+  createdAt: string
+  name: string
+  email: string
+  company: string
+  country: string
+  phone: string
+  product: string
+  productId: string
+  quantity: string
+  message: string
+  pageUrl: string
+  sourceIp: string
+  status: InquiryStatus
+  note: string
+  handledBy?: string | null
+  updatedAt?: string | null
+}
 export type AuditEntry = { id: string; at: string; userId: string; userName: string; action: string; summary: string; count: number }
+export type InquiryPageResult = { items: Inquiry[]; total: number; page: number; pageSize: number; counts: Record<InquiryStatus, number> }
 
 export class ApiError extends Error {
   status: number

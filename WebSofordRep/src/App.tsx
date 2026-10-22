@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Boxes, ChevronDown, ClipboardList, Code2, History, KeyRound, LayoutDashboard, LogOut, PlugZap, ScrollText, ShieldCheck, Users } from 'lucide-react'
+import { AlertTriangle, Boxes, ChevronDown, ClipboardList, Code2, Inbox, History, KeyRound, LayoutDashboard, LogOut, PlugZap, ScrollText, ShieldCheck, Users } from 'lucide-react'
 import clsx from 'clsx'
 import './App.css'
 import { api, ApiError, errorText, post, UNAUTHORIZED_EVENT, type AlibabaStatus, type AuthSession } from './api'
@@ -7,6 +7,7 @@ import { ConfirmDialog, Modal, Spinner, Toasts, type ConfirmRequest, type Toast 
 import { AppContext, type AppContextValue, type TabKey } from './context'
 import { ConnectionPage } from './pages/ConnectionPage'
 import { AuditPage } from './pages/AuditPage'
+import { InquiriesPage } from './pages/InquiriesPage'
 import { OverviewPage } from './pages/OverviewPage'
 import { UsersPage } from './pages/UsersPage'
 import { JobsPage } from './pages/JobsPage'
@@ -19,6 +20,7 @@ import { WorkbenchPage } from './pages/WorkbenchPage'
 const tabs: { key: TabKey; label: string; icon: typeof Boxes; advanced?: boolean; admin?: boolean }[] = [
   { key: 'overview', label: '概览', icon: LayoutDashboard },
   { key: 'products', label: '商品', icon: Boxes },
+  { key: 'inquiries', label: '询盘', icon: Inbox },
   { key: 'jobs', label: '后台任务', icon: History },
   { key: 'connection', label: '店铺连接', icon: PlugZap, admin: true },
   { key: 'users', label: '用户管理', icon: Users, advanced: true, admin: true },
@@ -59,6 +61,16 @@ function App() {
       setAlibaba(null)
       // 0 = network failure, 5xx = proxy could not reach the API; don't mislabel that as missing Alibaba config.
       setServerDown(err instanceof ApiError && (err.status === 0 || err.status >= 500))
+    }
+  }, [])
+
+  // New website inquiries, shown as a badge on the tab.
+  const [newInquiries, setNewInquiries] = useState(0)
+  const refreshInquiries = useCallback(async () => {
+    try {
+      setNewInquiries((await api<{ new: number }>('/api/inquiries/summary')).new)
+    } catch {
+      // The badge is a convenience; the page itself reports errors.
     }
   }, [])
 
@@ -103,6 +115,16 @@ function App() {
     }, 0)
     return () => window.clearTimeout(timer)
   }, [session?.authenticated, refreshAlibaba, notify])
+
+  useEffect(() => {
+    if (!session?.authenticated) return
+    const first = window.setTimeout(() => void refreshInquiries(), 0)
+    const timer = window.setInterval(() => void refreshInquiries(), 60_000)
+    return () => {
+      window.clearTimeout(first)
+      window.clearInterval(timer)
+    }
+  }, [session?.authenticated, refreshInquiries])
 
   const [passwordOpen, setPasswordOpen] = useState(false)
   const isAdmin = session?.role === 'Admin'
@@ -149,6 +171,7 @@ function App() {
             {allowedTabs.filter((x) => !x.advanced).map(({ key, label, icon: Icon }) => (
               <button key={key} type="button" className={clsx(tab === key && 'active')} onClick={() => navigate(key)}>
                 <Icon size={16} /> {label}
+                {key === 'inquiries' && newInquiries > 0 && <span className="count">{newInquiries}</span>}
               </button>
             ))}
             <div className="more">
@@ -194,6 +217,7 @@ function App() {
 
         {tab === 'overview' && <OverviewPage key={visit} />}
         {tab === 'products' && <ProductsPage key={visit} />}
+        {tab === 'inquiries' && <InquiriesPage onChanged={() => void refreshInquiries()} />}
         {tab === 'jobs' && <JobsPage />}
         {tab === 'connection' && isAdmin && <ConnectionPage />}
         {tab === 'users' && isAdmin && <UsersPage />}

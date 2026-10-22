@@ -372,3 +372,9 @@ pre.code.tall { max-height: 560px; }
 .account .actions select { width: auto; height: 32px; }
 .small-note { font-size: 12px; line-height: 1.6; }
 @media (max-width: 760px) { .account { flex-direction: column; align-items: stretch; } }
+
+/* Website inquiries */
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: var(--bg); }
+.inquiry-message { margin: 14px 0; padding: 12px 14px; border-radius: 8px; background: var(--bg); white-space: pre-wrap; line-height: 1.6; }
+.tabs .count { margin-left: 4px; min-width: 18px; padding: 0 5px; border-radius: 9px; background: var(--bad); color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
