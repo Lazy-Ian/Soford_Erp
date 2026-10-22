@@ -28,12 +28,32 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
         }
     }
 
-    public async Task<ProductRecord?> GetAsync(Guid id) => (await GetAllAsync()).FirstOrDefault(x => x.Id == id);
+    public async Task<ProductRecord?> GetAsync(Guid id)
+    {
+        await _lock.WaitAsync();
+        try
+        {
+            return (await ReadUnsafeAsync()).FirstOrDefault(x => x.Id == id)?.Copy();
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
 
     public async Task<List<ProductRecord>> GetManyAsync(IEnumerable<Guid> ids)
     {
         var order = ids.Distinct().Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
-        return (await GetAllAsync()).Where(x => order.ContainsKey(x.Id)).OrderBy(x => order[x.Id]).ToList();
+        if (order.Count == 0) return [];
+        await _lock.WaitAsync();
+        try
+        {
+            return (await ReadUnsafeAsync()).Where(x => order.ContainsKey(x.Id)).OrderBy(x => order[x.Id]).Select(x => x.Copy()).ToList();
+        }
+        finally
+        {
+            _lock.Release();
+        }
     }
 
     public Task<ProductRecord> CreateAsync(ProductRecord product) => WriteAsync(all =>

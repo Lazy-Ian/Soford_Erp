@@ -28,6 +28,7 @@ builder.Services.AddCors(options =>
             .AllowAnyMethod()
             .AllowCredentials());
 });
+builder.Services.AddWebsiteInquiries(builder.Configuration);
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddProblemDetails();
@@ -145,6 +146,7 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseCors("web");
+app.UseRateLimiter();
 app.UseMiddleware<BrowserRequestOriginGuard>();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -154,6 +156,7 @@ api.MapAuthEndpoints();
 api.MapAlibabaEndpoints();
 api.MapCatalogEndpoints();
 api.MapUserEndpoints();
+app.MapInquiryEndpoints(api);
 
 // The seller is redirected here by Alibaba; it must match the callback URL registered in App Console.
 app.MapGet("/openapi/callback", ApiEndpoints.CallbackAsync);
