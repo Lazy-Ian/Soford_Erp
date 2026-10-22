@@ -10,8 +10,15 @@ const SITE = {
   showPrices: true,
   // When false, homepage softens unverified SLA copy (24h reply etc.).
   claimsVerified: false,
-  inquiryEndpoint: ["localhost", "127.0.0.1"].includes(location.hostname)
-    ? "http://localhost:5153/public/inquiries" : "/public/inquiries",
+  // Local: hit the API directly. Path host (stepnex.cn/soford/): same-prefix proxy.
+  // Dedicated domain later: same-origin /public/inquiries.
+  inquiryEndpoint: (() => {
+    const host = location.hostname || "";
+    const path = location.pathname || "/";
+    if (host === "localhost" || host === "127.0.0.1") return "http://localhost:5153/public/inquiries";
+    if (path === "/soford" || path.startsWith("/soford/")) return "/soford/public/inquiries";
+    return "/public/inquiries";
+  })(),
 };
 
 /** Reject known placeholders so they never render as real contact details. */

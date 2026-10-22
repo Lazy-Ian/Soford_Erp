@@ -4,6 +4,10 @@
 # With an email and no certificate yet, a Let's Encrypt certificate is requested automatically.
 set -euo pipefail
 
+# Non-interactive apt (needrestart otherwise prompts which services to restart and hangs SSH).
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+
 DOMAIN="${1:-erp.soford.cn}"
 EMAIL="${2:-}"
 APP_ROOT="/opt/soford-erp"

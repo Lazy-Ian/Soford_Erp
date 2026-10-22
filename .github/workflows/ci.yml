@@ -89,7 +89,7 @@ jobs:
           sudo cp /etc/letsencrypt/live/erp.soford.cn/*.pem /etc/letsencrypt/live/www.soford.cn/
           docker run --rm -v "$PWD/deploy/nginx/soford-website.https.conf:/etc/nginx/conf.d/default.conf:ro" \
             -v /etc/letsencrypt:/etc/letsencrypt:ro nginx:1.18 nginx -t
-          # The stepnex.cn fallback entry is a location snippet; check it inside a minimal server block.
-          echo 'server { listen 80; include /etc/nginx/snippets/stepnex-erp.locations.conf; }' > "$RUNNER_TEMP/stepnex.conf"
+          # The stepnex.cn path entries are location snippets; check them inside a minimal server block.
+          echo 'server { listen 80; include /etc/nginx/snippets/stepnex-erp.locations.conf; include /etc/nginx/snippets/stepnex-soford-website.locations.conf; }' > "$RUNNER_TEMP/stepnex.conf"
           docker run --rm -v "$RUNNER_TEMP/stepnex.conf:/etc/nginx/conf.d/default.conf:ro" \
             -v "$PWD/deploy/nginx/snippets:/etc/nginx/snippets:ro" nginx:1.18 nginx -t

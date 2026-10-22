@@ -52,7 +52,10 @@ Write-Host "Running server installer. You may be asked for the server password a
 Write-Host "This adds a separate Nginx site for $Domain and does not overwrite existing www.stepnex.cn config."
 Write-Host ""
 
-Invoke-Native "ssh" @($SshArguments + @("-t", $Target, "bash ~/install-soford-erp.sh '$Domain' '$Email'"))
+Invoke-Native "ssh" @($SshArguments + @(
+        "-t", $Target,
+        "export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a; bash ~/install-soford-erp.sh '$Domain' '$Email'"
+    ))
 
 Write-Host ""
 Write-Host "Upload/deploy step finished."

@@ -30,7 +30,7 @@ function setup(fetch) {
 
 test("rejects placeholder phone numbers used as contact details", () => {
   const context = vm.createContext({
-    window: {}, location: { hostname: "example.com", href: "https://example.com/", hash: "" },
+    window: {}, location: { hostname: "example.com", href: "https://example.com/", pathname: "/", hash: "" },
     document: { createElement: () => ({ addEventListener() {} }), body: { dataset: {}, append() {} },
       addEventListener() {}, querySelector: () => null, querySelectorAll: () => [] },
     addEventListener() {},
