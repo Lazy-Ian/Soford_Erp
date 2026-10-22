@@ -12,6 +12,8 @@ Alibaba.com 国际站（ICBU）店铺的商品管理工作台，面向主账号�
 
 文档：[产品需求](docs/01-产品需求.md) · [技术方案](docs/02-技术方案.md) · [实施计划与验收](docs/03-实施计划.md) · [使用说明](USAGE.md)
 
+本轮完善清单及验收见 [优化计划](docs/04-优化计划.md)；下一阶段路线见 [下一阶段计划](docs/05-下一阶段计划.md)；英文官网、产品目录及网站询盘联调见 [官网说明](SofordWebsite/README.md)；上线前业务资料见 [官网上线资料清单](docs/06-官网上线资料清单.md)。
+
 ## 项目结构
 
 | 目录 | 说明 |
@@ -19,9 +21,10 @@ Alibaba.com 国际站（ICBU）店铺的商品管理工作台，面向主账号�
 | `SofordRepApi` | ASP.NET Core 8 API。`Alibaba/` IOP 客户端、签名、多账号授权，`Catalog/` 商品、导入、质检、AI 建议，`Publishing/` 后台任务与自动同步，`Infrastructure/` 存储、用户、操作记录，`Endpoints/` 路由 |
 | `SofordRepApi.Tests` | xUnit 单元测试与接口集成测试（签名、响应解析、报文映射、更新安全检查、导入、质检、权限、登录防护） |
 | `WebSofordRep` | React + Vite 前端（中文界面） |
+| `SofordWebsite` | 纯静态英文官网；询盘提交至 `/public/inquiries` |
 | `deploy/` | Ubuntu 无 Docker 部署（Nginx + systemd） |
 
-数据保存在 `App_Data`（或 `Soford__DataPath`）：`products.json`、`publish-jobs.json`、`alibaba-accounts.json`（各账号授权，加密）、`users.json`、`audit-log.json`、`automation.json`、`alibaba-api-logs.json`、`category-attributes.json`，以及加密用的 `data-protection-keys/`。
+数据保存在 `App_Data`（或 `Soford__DataPath`）：`products.json`、`publish-jobs.json`、`alibaba-accounts.json`（各账号授权，加密）、`users.json`、`audit-log.json`、`inquiries.json`、`automation.json`、`alibaba-api-logs.json`、`category-attributes.json`，以及加密用的 `data-protection-keys/`。
 
 ## 本地运行
 

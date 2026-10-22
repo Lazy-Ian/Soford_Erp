@@ -44,6 +44,12 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run build
+      - name: Website scripts and inquiry regression tests
+        working-directory: .
+        run: |
+          node --check SofordWebsite/assets/site.js
+          node --check SofordWebsite/scripts/export-products.mjs
+          node --test SofordWebsite/tests/*.test.mjs
 
   deploy-scripts:
     name: Deploy scripts
@@ -68,6 +74,10 @@ jobs:
             docker run --rm -v "$PWD/deploy/nginx/soford-erp.$site.conf:/etc/nginx/conf.d/default.conf:ro" \
               -v /etc/letsencrypt:/etc/letsencrypt:ro nginx:1.18 nginx -t
           done
+          sudo mkdir -p /etc/letsencrypt/live/www.soford.cn
+          sudo cp /etc/letsencrypt/live/erp.soford.cn/*.pem /etc/letsencrypt/live/www.soford.cn/
+          docker run --rm -v "$PWD/deploy/nginx/soford-website.https.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v /etc/letsencrypt:/etc/letsencrypt:ro nginx:1.18 nginx -t
           # The stepnex.cn fallback entry is a location snippet; check it inside a minimal server block.
           echo 'server { listen 80; include /etc/nginx/snippets/stepnex-erp.locations.conf; }' > "$RUNNER_TEMP/stepnex.conf"
           docker run --rm -v "$RUNNER_TEMP/stepnex.conf:/etc/nginx/conf.d/default.conf:ro" \

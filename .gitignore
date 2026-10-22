@@ -15,3 +15,7 @@ soford-erp-server.zip
 .web*.log
 .local-logs/
 .playwright-mcp/
+.test-results/
+.claude/
+.test-results/
+.claude/
