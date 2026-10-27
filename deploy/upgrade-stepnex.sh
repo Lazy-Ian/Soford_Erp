@@ -14,7 +14,10 @@ test -d "$root/api"
 test -d "$website"
 mkdir -p "$release" "$snapshot"
 chmod 700 "$root/releases" "$release" "$snapshot"
-unzip -oq "$archive" -d "$release"
+unzip_status=0
+unzip -oq "$archive" -d "$release" || unzip_status=$?
+# PowerShell Compress-Archive uses Windows separators; unzip extracts those successfully but exits 1.
+if [ "$unzip_status" -gt 1 ]; then exit "$unzip_status"; fi
 python3 - "$release" "$revision" <<'PY'
 import json, pathlib, sys
 root, revision = pathlib.Path(sys.argv[1]), sys.argv[2]
