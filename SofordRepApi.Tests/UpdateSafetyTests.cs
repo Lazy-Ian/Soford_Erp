@@ -233,4 +233,61 @@ public class UpdateSafetyTests
         Assert.True(result.Success, result.Message);
         Assert.Contains("/icbu/product/edit-price", gateway.Calls);
     }
+
+    [Fact]
+    public async Task PullDetail_WritesDescriptionWithoutTouchingOtherFields()
+    {
+        var (operations, products, gateway) = await SetupAsync();
+        var importedAt = DateTimeOffset.UtcNow.AddDays(-2);
+        var product = Imported(importedAt);
+        product.Description = "";
+        product.ContentUpdatedAt = importedAt;
+        product.PublishedContentAt = importedAt;
+        product = await products.CreateAsync(product);
+        gateway.Bodies["/alibaba/icbu/product/get/v2"] = ListingJson(importedAt);
+
+        var result = await operations.PullDetailAsync(product.Id);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Contains("已拉取详情", result.Message);
+        var after = (await products.GetAsync(product.Id))!;
+        Assert.Equal("Rich description", after.Description);
+        Assert.Equal("Portable Wireless Bluetooth Speaker Waterproof IPX7", after.Title);
+        Assert.Equal(5m, after.Price);
+        Assert.Equal("MS-1", after.Sku);
+        Assert.False(after.HasUnpublishedChanges);
+        Assert.DoesNotContain("/alibaba/icbu/product/update/v2", gateway.Calls);
+    }
+
+    [Fact]
+    public async Task PullDetail_DoesNotEraseLocalDescriptionWhenAlibabaReturnsNone()
+    {
+        var (operations, products, gateway) = await SetupAsync();
+        var importedAt = DateTimeOffset.UtcNow.AddDays(-2);
+        var product = Imported(importedAt);
+        product.ContentUpdatedAt = importedAt;
+        product.PublishedContentAt = importedAt;
+        product = await products.CreateAsync(product);
+        gateway.Bodies["/alibaba/icbu/product/get/v2"] = ListingJson(importedAt).Replace("Rich description", "");
+
+        var result = await operations.PullDetailAsync(product.Id);
+
+        Assert.False(result.Success);
+        Assert.Contains("未返回详情正文", result.Message);
+        Assert.Equal("20W stereo sound, 12 hour battery.", (await products.GetAsync(product.Id))!.Description);
+    }
+
+    [Fact]
+    public async Task PullDetail_KeepsUnpublishedLocalDescription()
+    {
+        var (operations, products, gateway) = await SetupAsync();
+        var product = await products.CreateAsync(Imported(DateTimeOffset.UtcNow.AddDays(-2)));
+        gateway.Bodies["/alibaba/icbu/product/get/v2"] = ListingJson(DateTimeOffset.UtcNow);
+
+        var result = await operations.PullDetailAsync(product.Id);
+
+        Assert.False(result.Success);
+        Assert.Contains("未发布", result.Message);
+        Assert.Equal("20W stereo sound, 12 hour battery.", (await products.GetAsync(product.Id))!.Description);
+    }
 }

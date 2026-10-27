@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Boxes, ChevronDown, ClipboardList, Code2, Inbox, History, KeyRound, LayoutDashboard, LogOut, PlugZap, ScrollText, ShieldCheck, Users } from 'lucide-react'
+import { AlertTriangle, Boxes, ChevronDown, ClipboardList, Code2, Globe, Inbox, History, KeyRound, LayoutDashboard, LogOut, PlugZap, ScrollText, ShieldCheck, Users } from 'lucide-react'
 import clsx from 'clsx'
 import './App.css'
 import { api, ApiError, errorText, post, UNAUTHORIZED_EVENT, type AlibabaStatus, type AuthSession } from './api'
@@ -8,6 +8,7 @@ import { AppContext, type AppContextValue, type TabKey } from './context'
 import { ConnectionPage } from './pages/ConnectionPage'
 import { AuditPage } from './pages/AuditPage'
 import { InquiriesPage } from './pages/InquiriesPage'
+import { WebsitePage } from './pages/WebsitePage'
 import { OverviewPage } from './pages/OverviewPage'
 import { UsersPage } from './pages/UsersPage'
 import { JobsPage } from './pages/JobsPage'
@@ -21,6 +22,7 @@ const tabs: { key: TabKey; label: string; icon: typeof Boxes; advanced?: boolean
   { key: 'overview', label: '概览', icon: LayoutDashboard },
   { key: 'products', label: '商品', icon: Boxes },
   { key: 'inquiries', label: '询盘', icon: Inbox },
+  { key: 'website', label: '官网', icon: Globe, admin: true },
   { key: 'jobs', label: '后台任务', icon: History },
   { key: 'connection', label: '店铺连接', icon: PlugZap, admin: true },
   { key: 'users', label: '用户管理', icon: Users, advanced: true, admin: true },
@@ -76,9 +78,12 @@ function App() {
 
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [visit, setVisit] = useState(0)
+  const previousHash = useRef(window.location.hash)
 
   const navigate = useCallback((next: TabKey, filter?: string) => {
+    if (!window.dispatchEvent(new Event('soford:before-navigate', { cancelable: true }))) return
     window.location.hash = filter ? `${next}/${filter}` : next
+    previousHash.current = window.location.hash
     setTab(next)
     setAdvancedOpen(false)
     // Remount the page so a filter passed from the overview applies even when the tab is already open.
@@ -90,7 +95,14 @@ function App() {
       .then(setSession)
       .catch(() => setSession({ authenticated: false }))
     const onUnauthorized = () => setSession((current) => (current?.authenticated ? { ...current, expired: true } : { authenticated: false }))
-    const onHash = () => setTab(readTab())
+    const onHash = () => {
+      if (window.location.hash !== previousHash.current && !window.dispatchEvent(new Event('soford:before-navigate', { cancelable: true }))) {
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${previousHash.current}`)
+        return
+      }
+      previousHash.current = window.location.hash
+      setTab(readTab())
+    }
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized)
     window.addEventListener('hashchange', onHash)
     return () => {
@@ -152,6 +164,7 @@ function App() {
   const allowedTabs = tabs.filter((x) => !x.admin || isAdmin)
 
   const logout = async () => {
+    if (!window.dispatchEvent(new Event('soford:before-navigate', { cancelable: true }))) return
     await api('/api/auth/logout', { method: 'POST' }).catch(() => undefined)
     setSession({ authenticated: false })
   }
@@ -218,6 +231,7 @@ function App() {
         {tab === 'overview' && <OverviewPage key={visit} />}
         {tab === 'products' && <ProductsPage key={visit} />}
         {tab === 'inquiries' && <InquiriesPage onChanged={() => void refreshInquiries()} />}
+        {tab === 'website' && isAdmin && <WebsitePage />}
         {tab === 'jobs' && <JobsPage />}
         {tab === 'connection' && isAdmin && <ConnectionPage />}
         {tab === 'users' && isAdmin && <UsersPage />}

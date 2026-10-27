@@ -36,7 +36,7 @@ public sealed record InquiryRequest(
     string? Name, string? Email, string? Company, string? Country, string? Phone,
     string? Product, string? ProductId, string? Quantity, string? Message, string? PageUrl, string? Website);
 
-public sealed record InquiryUpdateRequest(InquiryStatus? Status, string? Note);
+public sealed record InquiryUpdateRequest(InquiryStatus? Status, string? Note, DateTimeOffset? ExpectedUpdatedAt = null);
 public sealed record InquiryPage(List<Inquiry> Items, int Total, int Page, int PageSize, Dictionary<InquiryStatus, int> Counts);
 
 /// <summary>Website inquiries (inquiries.json), held in memory after the first read.</summary>
@@ -119,13 +119,16 @@ public sealed class InquiryStore(AppPaths paths)
         }
     }
 
-    public async Task<Inquiry?> UpdateAsync(Guid id, Action<Inquiry> change)
+    public Task<Inquiry?> UpdateAsync(Guid id, Action<Inquiry> change) => UpdateAsync(id, change, null, false);
+
+    public async Task<Inquiry?> UpdateAsync(Guid id, Action<Inquiry> change, DateTimeOffset? expectedUpdatedAt, bool checkVersion = true)
     {
         await _lock.WaitAsync();
         try
         {
             var all = await ReadAsync();
             if (all.FirstOrDefault(x => x.Id == id) is not { } inquiry) return null;
+            if (checkVersion && inquiry.UpdatedAt != expectedUpdatedAt) throw new WebsiteConcurrencyException();
             try
             {
                 change(inquiry);
@@ -161,7 +164,7 @@ public static class InquiryEndpoints
     {
         services.AddSingleton<InquiryStore>();
         services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
-            policy.WithOrigins(AllowedOrigins(config)).WithMethods("POST").WithHeaders("Content-Type")));
+            policy.WithOrigins(AllowedOrigins(config)).WithMethods("GET", "HEAD", "POST").WithHeaders("Content-Type")));
         var perHour = config.GetValue("Website:InquiriesPerHourPerIp", 10);
         services.AddRateLimiter(options =>
         {
@@ -203,13 +206,16 @@ public static class InquiryEndpoints
             if (request.Status is { } requestedStatus && !Enum.IsDefined(requestedStatus))
                 return ApiEndpoints.Problem("询盘状态无效");
             var user = await access.CurrentAsync(principal);
-            var updated = await store.UpdateAsync(id, x =>
+            Inquiry? updated;
+            try { updated = await store.UpdateAsync(id, x =>
             {
                 if (request.Status is { } status) x.Status = status;
                 if (request.Note is not null) x.Note = Clip(request.Note, 2000);
                 x.HandledBy = user?.Name;
-                x.UpdatedAt = time.GetUtcNow();
-            });
+                var now = time.GetUtcNow();
+                x.UpdatedAt = x.UpdatedAt is { } previous && now <= previous ? previous.AddTicks(1) : now;
+            }, request.ExpectedUpdatedAt); }
+            catch (WebsiteConcurrencyException) { return ApiEndpoints.Problem("询盘已被修改", "请关闭后重新打开最新询盘，再保存修改。", StatusCodes.Status409Conflict); }
             if (updated is null) return ApiEndpoints.Problem("询盘不存在", status: StatusCodes.Status404NotFound);
             await audit.RecordAsync(user, "处理询盘", $"{updated.Name} <{updated.Email}>：{updated.Status}");
             return Results.Ok(updated);

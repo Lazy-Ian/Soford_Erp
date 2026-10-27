@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/site.css">
+  <link rel="stylesheet" href="assets/site.css?v=20261027">
 </head>
 <body data-page="catalog">
 
@@ -18,55 +18,69 @@
   <div class="wrap">
     <a class="logo" href="index.html" aria-label="Soford home">
       <img class="logo-img" src="assets/logo.png" alt="SOFORD" width="179" height="155">
-      <span class="logo-tag">Rubber &amp; Sports<br>Flooring</span>
+      <span class="logo-tag" data-i18n-html="logo.tag">Rubber &amp; Sports<br>Flooring</span>
     </a>
     <nav class="nav" aria-label="Main">
-      <a href="products.html" aria-current="page">Products</a>
-      <a href="index.html#applications">Applications</a>
-      <a href="index.html#why">Why Soford</a>
-      <a href="index.html#process">How We Work</a>
-      <a href="index.html#faq">FAQ</a>
+      <div class="nav-products">
+        <a href="products.html" aria-current="page" data-i18n="nav.products">Products</a>
+        <div class="mega" data-mega></div>
+      </div>
+      <a href="index.html#applications" data-i18n="nav.apps">Applications</a>
+      <a href="index.html#why" data-i18n="nav.factory">Factory</a>
+      <a href="index.html#faq" data-i18n="nav.faq">FAQ</a>
     </nav>
-    <a class="btn btn-primary btn-sm header-cta" href="index.html#contact">Get a quote</a>
-    <button class="menu-toggle" type="button" aria-label="Menu" aria-expanded="false">
+    <a class="btn btn-primary btn-sm header-cta" href="index.html#contact" data-i18n="nav.quote">Get a quote</a>
+    <button class="menu-toggle" type="button" data-i18n-aria="menu.aria" aria-label="Menu" aria-expanded="false">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
   </div>
 </header>
 
 <main>
-  <section class="page-hero fleck">
-    <div class="wrap">
-      <span class="eyebrow" style="color:#8fdc86">Product catalog</span>
-      <h1 data-heading>All products</h1>
-      <p data-sub></p>
+  <div class="catalog-bar">
+    <div class="wrap catalog-bar-inner">
+      <p class="crumbs">
+        <a href="index.html" data-i18n="catalog.home">Home</a>
+        <span aria-hidden="true">/</span>
+        <a href="products.html" data-i18n="nav.products">Products</a>
+        <span aria-hidden="true">/</span>
+        <b data-heading>All products</b>
+      </p>
+      <p class="catalog-blurb" data-sub></p>
     </div>
-  </section>
+  </div>
 
   <div class="wrap catalog">
     <aside class="filters">
       <div class="search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-        <input type="search" placeholder="Search e.g. 20mm, EPDM, blue" aria-label="Search products" data-search>
+        <input type="search" data-i18n-placeholder="catalog.searchPh" data-i18n-aria="catalog.searchAria" placeholder="Search e.g. 20mm, EPDM, blue" aria-label="Search products" data-search>
       </div>
       <div>
-        <h4>Category</h4>
+        <h4 data-i18n="catalog.category">Category</h4>
         <div class="filter-list" data-cat-filter></div>
+      </div>
+      <div>
+        <h4 data-i18n="catalog.thickness">Thickness</h4>
+        <div class="filter-list" data-thick-filter></div>
       </div>
     </aside>
 
     <section>
       <div class="toolbar">
-        <p data-count></p>
-        <select aria-label="Sort products" data-sort>
-          <option value="featured">Sort: Recommended</option>
-          <option value="price-asc">Price: low to high</option>
-          <option value="price-desc">Price: high to low</option>
-          <option value="moq">Lowest MOQ</option>
+        <div class="toolbar-lead">
+          <div class="active-filters" data-chips></div>
+          <p data-count></p>
+        </div>
+        <select data-i18n-aria="catalog.sortAria" aria-label="Sort products" data-sort>
+          <option value="featured" data-i18n="catalog.sort">Sort: Recommended</option>
+          <option value="price-asc" data-i18n="catalog.priceAsc">Price: low to high</option>
+          <option value="price-desc" data-i18n="catalog.priceDesc">Price: high to low</option>
+          <option value="moq" data-i18n="catalog.moq">Lowest MOQ</option>
         </select>
       </div>
       <div class="grid" data-grid></div>
-      <div class="load-more" data-more hidden><button class="btn btn-dark" type="button">Load more</button></div>
+      <div class="load-more" data-more hidden><button class="btn btn-dark" type="button" data-i18n="catalog.loadMore">Load more</button></div>
     </section>
   </div>
 </main>
@@ -76,26 +90,30 @@
     <div class="footer-grid">
       <div>
         <a class="logo" href="index.html"><img class="logo-img logo-img-lg" src="assets/logo-white.png" alt="SOFORD" width="179" height="154"></a>
-        <p class="about">Manufacturer and exporter of rubber flooring, sports surfaces, artificial grass and EVA mats, based in Shandong, China.</p>
+        <p class="about" data-i18n="footer.about">Qingdao SoFord Import And Export Co., Ltd. Rubber flooring, sports surfaces, artificial grass and EVA mats, from Qingdao, Shandong, China.</p>
       </div>
-      <div><h4>Products</h4><ul data-footer-cats></ul></div>
-      <div><h4>Company</h4><ul>
-        <li><a href="index.html#why">Why Soford</a></li>
-        <li><a href="index.html#process">How we work</a></li>
-        <li><a href="index.html#faq">FAQ</a></li>
-        <li data-site-optional><a data-site="alibabaStore" data-keep-text target="_blank" rel="noopener">Alibaba store</a></li>
+      <div><h4 data-i18n="footer.products">Products</h4><ul data-footer-cats></ul></div>
+      <div><h4 data-i18n="footer.company">Company</h4><ul>
+        <li><a href="index.html#why" data-i18n="nav.why">Why Soford</a></li>
+        <li><a href="index.html#process" data-i18n="nav.process">How we work</a></li>
+        <li><a href="index.html#faq" data-i18n="nav.faq">FAQ</a></li>
+        <li data-site-optional hidden><a data-site="alibabaStore" data-keep-text data-i18n="footer.alibaba" target="_blank" rel="noopener">Alibaba store</a></li>
       </ul></div>
-      <div><h4>Contact</h4><ul>
-        <li><a data-site="email"></a></li>
-        <li data-site-optional><a data-site="phone"></a></li>
-        <li><a href="index.html#contact">Send an inquiry</a></li>
+      <div><h4 data-i18n="footer.contact">Contact</h4><ul data-footer-contacts>
+        <li data-footer-inquiry><a href="index.html#contact" data-i18n="footer.inquiry">Send an inquiry</a></li>
       </ul></div>
     </div>
-    <div class="footer-bottom"><span>© <span data-year></span> Soford. All rights reserved.</span><span>Made in Shandong, shipped worldwide.</span></div>
+    <div class="footer-bottom"><span>© <span data-year></span> <span data-i18n="footer.rights">Qingdao SoFord Import And Export Co., Ltd. All rights reserved.</span></span><span data-i18n="footer.made">Made in Shandong, shipped worldwide.</span></div>
   </div>
 </footer>
 
-<script src="data/products.js"></script>
-<script src="assets/site.js"></script>
+<nav class="dock" data-i18n-aria="dock.aria" aria-label="Quick actions">
+  <a class="dock-link" href="products.html" data-i18n="nav.products">Products</a>
+  <a class="btn btn-primary" href="index.html#contact" data-i18n="nav.quote">Get a quote</a>
+</nav>
+
+<script src="assets/i18n-extra.js?v=20261027"></script>
+<script src="assets/i18n.js?v=20261027"></script>
+<script src="assets/site.js?v=20261027"></script>
 </body>
 </html>

@@ -103,6 +103,11 @@ public class InquiryTests(InquiryFactory factory) : IClassFixture<InquiryFactory
         Assert.Equal("Replied", (await admin.GetFromJsonAsync<JsonElement>($"/api/inquiries/search?q={email}"))
             .GetProperty("items")[0].GetProperty("status").GetString());
 
+        Assert.Equal(HttpStatusCode.Conflict, (await admin.PutAsJsonAsync($"/api/inquiries/{id}", new { status = "Closed", note = "Stale overwrite" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await admin.PutAsJsonAsync($"/api/inquiries/{id}", new { status = "Closed", note = "Fresh update", expectedUpdatedAt = body.GetProperty("updatedAt").GetString() })).StatusCode);
+        Assert.Equal("Fresh update", (await admin.GetFromJsonAsync<JsonElement>($"/api/inquiries/search?q={email}"))
+            .GetProperty("items")[0].GetProperty("note").GetString());
+
         // 6 per hour: five requests above went through the limiter, the sixth is allowed, the seventh is not.
         Assert.Equal(HttpStatusCode.OK, (await SubmitAsync(Valid())).StatusCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, (await SubmitAsync(Valid())).StatusCode);

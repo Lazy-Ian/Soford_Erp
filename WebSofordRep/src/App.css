@@ -69,6 +69,11 @@
 /* Small tables (overview, users, audit) do not need the product list's width; they scroll sideways on phones. */
 .table-wrap.flat table { min-width: 560px; table-layout: auto; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.person-list { display: grid; gap: 12px; margin-top: 14px; }
+.person-card { display: grid; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.person-card header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.person-card header strong { font-size: 13px; }
+.field-span { grid-column: 1 / -1; }
 .import-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-bottom: 12px; }
 .import-preview { max-height: 360px; overflow: auto; margin: 12px 0; }
 .import-preview table { min-width: 720px; }

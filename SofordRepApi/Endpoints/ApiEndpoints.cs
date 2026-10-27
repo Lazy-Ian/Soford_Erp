@@ -38,7 +38,7 @@ public static class ApiEndpoints
 
     public static void MapAuthEndpoints(this RouteGroupBuilder api)
     {
-        api.MapGet("/health", () => Results.Ok(new { status = "ok", utc = DateTimeOffset.UtcNow })).AllowAnonymous();
+        api.MapGet("/health", (IConfiguration config) => Results.Ok(new { status = "ok", utc = DateTimeOffset.UtcNow, revision = config["Release:Revision"] })).AllowAnonymous();
 
         api.MapGet("/auth/session", async (ClaimsPrincipal user, AccessService access) =>
             await access.CurrentAsync(user) is { } current
@@ -682,7 +682,7 @@ public static class ApiEndpoints
         });
 
         // Batch Alibaba operations on hundreds of products take longer than a proxy will wait, so they run as background jobs too.
-        foreach (var kind in new[] { JobKinds.Status, JobKinds.Inventory, JobKinds.Price, JobKinds.Online, JobKinds.Offline, JobKinds.Predict, JobKinds.Refresh, JobKinds.RefreshDiscard })
+        foreach (var kind in new[] { JobKinds.Status, JobKinds.Inventory, JobKinds.Price, JobKinds.Online, JobKinds.Offline, JobKinds.Predict, JobKinds.Refresh, JobKinds.RefreshDiscard, JobKinds.Detail })
         {
             catalog.MapPost($"/jobs/{kind}", async (IdsRequest request, IConfiguration config, PublishJobStore jobs, PublishQueue queue, ProductRepository repo, TimeProvider time,
                 ClaimsPrincipal principal, AccessService access, AuditLog audit) =>

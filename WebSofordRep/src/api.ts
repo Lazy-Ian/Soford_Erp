@@ -60,7 +60,7 @@ export type OperationItem = { productId: string; sku: string; success: boolean; 
 export type BatchResult = { total: number; succeeded: number; failed: number; items: OperationItem[] }
 
 export type PublishJobStatus = 'Queued' | 'Running' | 'Completed' | 'CompletedWithErrors' | 'Failed' | 'Interrupted'
-export type JobKind = 'publish' | 'status' | 'inventory' | 'price' | 'online' | 'offline' | 'predict' | 'refresh' | 'refresh-discard'
+export type JobKind = 'publish' | 'status' | 'inventory' | 'price' | 'online' | 'offline' | 'predict' | 'refresh' | 'refresh-discard' | 'detail'
 export type PublishJob = {
   id: string
   kind?: JobKind
@@ -227,6 +227,32 @@ export type Inquiry = {
 }
 export type AuditEntry = { id: string; at: string; userId: string; userName: string; action: string; summary: string; count: number }
 export type InquiryPageResult = { items: Inquiry[]; total: number; page: number; pageSize: number; counts: Record<InquiryStatus, number> }
+export type WebsiteContact = {
+  id: string
+  name: string
+  title: string
+  email: string
+  phone: string
+  whatsapp: string
+  wechat: string
+  qq: string
+}
+export type WebsiteTerms = {
+  payment: string
+  sample: string
+  tradeTerms: string
+  moq: string
+  leadTime: string
+  warranty: string
+}
+export type WebsiteProfile = {
+  revision: number
+  company: string
+  address: string
+  alibabaStore: string
+  terms: WebsiteTerms
+  contacts: WebsiteContact[]
+}
 
 export class ApiError extends Error {
   status: number

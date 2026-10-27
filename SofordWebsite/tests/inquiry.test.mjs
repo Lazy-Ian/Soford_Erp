@@ -5,6 +5,36 @@ import vm from "node:vm";
 
 const source = readFileSync(new URL("../assets/site.js", import.meta.url), "utf8");
 
+function renderingContext() {
+  const context = vm.createContext({ window: {}, location: { hostname: "localhost", pathname: "/", hash: "" },
+    document: { createElement: () => ({ addEventListener() {} }), body: { dataset: {}, append() {} }, querySelector: () => null, querySelectorAll: () => [] },
+    addEventListener() {}, URLSearchParams });
+  vm.runInContext(source, context);
+  return context;
+}
+
+test("public prices retain currency and unit markup stays text", () => {
+  const context = renderingContext();
+  const html = vm.runInContext(`cardHtml({ id: "1", title: "Rubber tile", category: "gym-tiles", images: ["https://cdn.example/a.jpg"], priceMin: 123, priceMax: 123, currency: "CNY", unit: '<img src=x onerror=alert(1)>', moq: 1, specs: [] })`, context);
+  assert.match(html, /CNY 123/);
+  assert.doesNotMatch(html, /\$123/);
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.match(html, /&lt;img src=x/);
+  assert.equal(vm.runInContext('leadTimeText({leadTimeDays: 3})', context), "3");
+  assert.equal(vm.runInContext('leadTimeText({leadTimeDays: 0})', context), "Please confirm");
+  assert.equal(vm.runInContext('fromPrice([{currency: "CNY",unit: "Piece",priceMin:123},{currency:"USD",unit:"Piece",priceMin:1},{currency:"CNY",unit:"Piece",priceMin:200}])', context), "CNY 123 / pc");
+});
+
+test("language switching replaces a stale lang parameter and keeps the product", () => {
+  const context = vm.createContext({ window: {}, document: { documentElement: {lang: "en"}, body:{dataset:{}}, querySelector:()=>null, querySelectorAll:()=>[] },
+    location: {search: "?lang=en&id=42"}, localStorage:{getItem:()=>"en",setItem(){}}, URLSearchParams });
+  vm.runInContext(readFileSync(new URL("../assets/i18n.js", import.meta.url), "utf8"), context);
+  context.sofordSetLang("zh");
+  const params = new URLSearchParams(context.location.search);
+  assert.equal(params.get("lang"), "zh");
+  assert.equal(params.get("id"), "42");
+});
+
 function setup(fetch) {
   const context = vm.createContext({
     window: {}, location: { hostname: "localhost", href: "http://localhost:5180/index.html?product=42", hash: "" },
@@ -93,3 +123,52 @@ for (const [name, response, pattern] of [
     assert.match(ui.note.textContent, pattern);
   });
 }
+
+test("Chinese copy covers every English key", () => {
+  const documentStub = {
+    documentElement: { lang: "" },
+    body: { dataset: { page: "home" } },
+    title: "",
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  const context = vm.createContext({
+    document: documentStub,
+    location: { search: "", href: "http://localhost/", pathname: "/", hash: "" },
+    localStorage: { getItem: () => "zh", setItem() {} },
+    URLSearchParams,
+    window: {},
+  });
+  vm.runInContext(readFileSync(new URL("../assets/i18n-extra.js", import.meta.url), "utf8"), context);
+  vm.runInContext(readFileSync(new URL("../assets/i18n.js", import.meta.url), "utf8"), context);
+  const packs = context.window.SOFORD_I18N;
+  for (const lang of ["zh", "es", "pt", "fr", "de", "ru", "ar"]) {
+    const missing = Object.keys(packs.en).filter((key) => packs[lang]?.[key] == null);
+    assert.deepEqual(missing, [], lang);
+  }
+  assert.equal(context.document.documentElement.lang, "zh");
+  assert.equal(context.window.sofordT("nav.products"), "产品");
+});
+
+test("thickness filters and shortened card titles", () => {
+  const context = vm.createContext({
+    window: {}, location: { hostname: "example.com", href: "https://example.com/", pathname: "/", hash: "" },
+    document: { createElement: () => ({ addEventListener() {} }), body: { dataset: {}, append() {} },
+      addEventListener() {}, querySelector: () => null, querySelectorAll: () => [] },
+    addEventListener() {},
+  });
+  vm.runInContext(source, context);
+  assert.deepEqual([...context.thicknessNumbers("20mm 25mm 30mm 40mm")], [20, 25, 30, 40]);
+  assert.deepEqual([...context.thicknessNumbers("10 12 25mm")], [10, 12, 25]);
+  assert.equal(context.matchesThick("6mm", "10"), true);
+  assert.equal(context.matchesThick("6mm", "25"), false);
+  assert.equal(context.matchesThick("12mm", "25"), true);
+  assert.equal(context.matchesThick("20mm 25mm 30mm", "50"), true);
+  assert.equal(context.matchesThick("20mm 25mm 30mm", "10"), false);
+  assert.equal(context.matchesThick("", "10"), false);
+  assert.equal(context.matchesThick("45mm", "all"), true);
+  const long = "Non-toxic Recycled Rubber Gym Floor Mat Blue 20mm Thick SGS Certified";
+  assert.equal(context.shortTitle(long).endsWith("…"), true);
+  assert.ok(context.shortTitle(long).length <= 60);
+  assert.equal(context.shortTitle("Short tile"), "Short tile");
+});

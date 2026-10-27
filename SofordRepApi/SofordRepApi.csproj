@@ -7,6 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Local business data and credentials must never enter a release package. -->
+    <Content Remove="App_Data/**;.env;.env.*" />
+    <None Remove="App_Data/**;.env;.env.*" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Anthropic" Version="12.51.0" />
     <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.8" />

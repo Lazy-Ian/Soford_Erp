@@ -4,6 +4,8 @@
 
 组成：Nginx（静态前端 + `/api`、`/openapi/callback` 反向代理）→ systemd 服务 `soford-erp-api`（`127.0.0.1:5153`）→ 数据目录 `/opt/soford-erp/app_data`。
 
+2026-10-27 检查：本地测试通过，但 [R1–R8](../docs/08-官网与ERP检查-2026-10-27.md) 待修复，当前工作区 CI、线上版本及恢复演练未验收。部署前按 [05 阶段 C](../docs/05-下一阶段计划.md) 核对；历史成功记录不代表本次可上线。
+
 ## 一键部署 / 升级（Windows 上执行）
 
 ```powershell
@@ -49,6 +51,30 @@ stepnex.cn 的 nginx 站点同时服务博客等其他应用，ERP 只占用 `/e
 
 注意：ERP 与同域名的其他网站属于同一来源，跨站请求防护无法区分它们。主域名备案完成后应尽快切回 `erp.soford.cn`（改回上面两个地址和 App Console 回调）。
 
+## 官网路径部署与验收
+
+官网配置入口为 `https://stepnex.cn/soford/`，静态文件在 `/opt/soford-website/`。配置见 [stepnex 官网片段](nginx/snippets/stepnex-soford-website.locations.conf)，上传与部署脚本为 `deploy/deploy-website-stepnex.sh`。本轮没有验证生产部署状态。
+
+| 外部路径 | API 目标 / 方法 |
+|---|---|
+| `/soford/public/products` | `/public/products`，GET |
+| `/soford/public/products/{id}` | `/public/products/{id}`，GET |
+| `/soford/public/site` | `/public/site`，GET |
+| `/soford/public/inquiries` | `/public/inquiries`，POST |
+
+`Website__AllowedOrigins` 配置实际来源 `https://stepnex.cn`，不带 `/soford/`；如同时开放 www，另加 www 来源。`AllowedHosts` 包含实际域名。独立域名模板 `nginx/soford-website.https.conf` 不代表已决定启用该域名；当前路径部署说明将 `www.soford.cn` 留给国际站，独立官网域名待确认。
+
+验收顺序：
+
+1. 记录目标提交、构建产物和备份；修复问题后核对最终 CI。
+2. 核对来源、主机名、证书和 Nginx 片段，执行 `nginx -t` 后重载。
+3. 分别检查首页、目录、一个真实商品详情、公开目录和 `/public/site`；除 HTTP 状态外，还核对 JSON 结构及实际业务内容。
+4. 检查普通字段转义、币种、交期、公司名及各处业务承诺，验证官网维护权限和旧版本保存冲突。
+5. 经部署验收流程提交一条明确标记的测试询盘，在 ERP 检查来源、产品、状态、备注和角标；记录测试询盘处理方式。
+6. 异地复制备份后隔离恢复，包含商品、账号、密钥、用户、`inquiries.json` 和 `website-profile.json`，确认登录与数据可读。
+
+当前部署脚本只对商品目录做部分断言，没有验证 `/public/site`；部分 curl 失败被忽略，且询盘 smoke 会真实写入记录。这些脚本问题仍待修复，不能把退出 0 或首页 200 作为完整验收。`check-go-live.ps1` 同样只覆盖现有本地检查，不能代替 R1–R8、服务器联调和恢复验证。
+
 ## 手动步骤（不使用 deploy-upload.ps1 时）
 
 ```powershell
@@ -78,6 +104,8 @@ sudo systemctl start soford-erp-api
 ```
 
 注意：`app_data/data-protection-keys` 与 `alibaba-accounts.json` 必须一起保留，缺少密钥则 Token 无法解密，只能重新授权（系统会把解不开的账号文件改名为 `alibaba-accounts.json.unreadable-时间` 保留，找回密钥后可改回原名）。
+
+备份脚本打包整个 `app_data` 和 `env`，因此应包含用户、询盘与官网资料。恢复演练先在隔离目录进行，不能用覆盖生产目录的命令充当演练；确认备份中的 `inquiries.json`、`website-profile.json` 可读取并能展示。
 
 ### 运行账号与沙箱
 

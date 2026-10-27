@@ -34,7 +34,7 @@ Step "ERP frontend lint+build" {
 Step "Website scripts" {
   node --check SofordWebsite/assets/site.js
   if ($LASTEXITCODE -ne 0) { return }
-  node --check SofordWebsite/scripts/export-products.mjs
+  node --check SofordWebsite/scripts/detail-html.mjs
   if ($LASTEXITCODE -ne 0) { return }
   node --test SofordWebsite/tests/*.test.mjs
 }

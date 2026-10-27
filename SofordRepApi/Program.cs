@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Configuration.AddJsonFile("release.json", optional: true, reloadOnChange: false);
 
 if (builder.Environment.IsDevelopment())
 {
@@ -110,6 +111,8 @@ builder.Services.AddSingleton<AlibabaTokenService>();
 builder.Services.AddSingleton<AlibabaClient>();
 builder.Services.AddSingleton<CategoryAttributeService>();
 builder.Services.AddSingleton<ProductRepository>();
+builder.Services.AddSingleton<WebsiteCatalog>();
+builder.Services.AddSingleton<WebsiteProfileStore>();
 builder.Services.AddSingleton<ProductQualityService>();
 builder.Services.AddSingleton<ProductImportService>();
 builder.Services.AddSingleton<ProductImportPlanner>();
@@ -157,6 +160,8 @@ api.MapAlibabaEndpoints();
 api.MapCatalogEndpoints();
 api.MapUserEndpoints();
 app.MapInquiryEndpoints(api);
+app.MapWebsiteCatalog();
+app.MapWebsiteProfile(api);
 
 // The seller is redirected here by Alibaba; it must match the callback URL registered in App Console.
 app.MapGet("/openapi/callback", ApiEndpoints.CallbackAsync);

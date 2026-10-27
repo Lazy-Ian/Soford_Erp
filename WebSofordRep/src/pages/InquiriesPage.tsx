@@ -127,7 +127,7 @@ function InquiryDialog({ inquiry, onClose, onSaved }: { inquiry: Inquiry; onClos
   const save = async () => {
     setBusy(true)
     try {
-      onSaved(await post<Inquiry>(`/api/inquiries/${inquiry.id}`, { status, note }, 'PUT'))
+      onSaved(await post<Inquiry>(`/api/inquiries/${inquiry.id}`, { status, note, expectedUpdatedAt: inquiry.updatedAt ?? null }, 'PUT'))
       notify('success', '询盘已更新。')
     } catch (err) {
       notify('error', errorText(err, '保存失败'))

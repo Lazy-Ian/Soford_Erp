@@ -1,5 +1,7 @@
 # Soford ERP
 
+发布更新（2026-10-27）：R1–R8 实现修复及本地回归已完成（后端 120、官网 15、ERP lint/build）；最终提交 CI 与生产验收待完成。当前进度以 [09 发布记录](docs/09-发布记录-2026-10-27.md) 为准，以下旧问题描述保留为检查基线。
+
 [![CI](https://github.com/Lazy-Ian/Soford_Erp/actions/workflows/ci.yml/badge.svg)](https://github.com/Lazy-Ian/Soford_Erp/actions/workflows/ci.yml)
 
 Alibaba.com 国际站（ICBU）店铺的商品管理工作台，面向主账号和多个子账号（业务员）：
@@ -12,6 +14,8 @@ Alibaba.com 国际站（ICBU）店铺的商品管理工作台，面向主账号�
 
 文档：[产品需求](docs/01-产品需求.md) · [技术方案](docs/02-技术方案.md) · [实施计划与验收](docs/03-实施计划.md) · [使用说明](USAGE.md)
 
+最新检查见 [官网与 ERP 检查记录（2026-10-27）](docs/08-官网与ERP检查-2026-10-27.md)。当前后端 120 项、官网 13 项测试及 ERP lint/build 通过，但 R1–R8 仍待修复，当前工作区 CI 与生产部署尚未验收。
+
 完善清单见 [优化计划](docs/04-优化计划.md)；路线见 [下一阶段计划](docs/05-下一阶段计划.md)；自动续跑交接见 [07](docs/07-自动执行交接.md)；官网见 [SofordWebsite/README.md](SofordWebsite/README.md)；业务资料见 [06](docs/06-官网上线资料清单.md)。
 
 ## 项目结构
@@ -21,10 +25,17 @@ Alibaba.com 国际站（ICBU）店铺的商品管理工作台，面向主账号�
 | `SofordRepApi` | ASP.NET Core 8 API。`Alibaba/` IOP 客户端、签名、多账号授权，`Catalog/` 商品、导入、质检、AI 建议，`Publishing/` 后台任务与自动同步，`Infrastructure/` 存储、用户、操作记录，`Endpoints/` 路由 |
 | `SofordRepApi.Tests` | xUnit 单元测试与接口集成测试（签名、响应解析、报文映射、更新安全检查、导入、质检、权限、登录防护） |
 | `WebSofordRep` | React + Vite 前端（中文界面） |
-| `SofordWebsite` | 纯静态英文官网；询盘提交至 `/public/inquiries` |
+| `SofordWebsite` | 静态官网及八种界面语言；商品读 `/public/products`，公司资料读 `/public/site`，询盘提交至 `/public/inquiries` |
 | `deploy/` | Ubuntu 无 Docker 部署（Nginx + systemd） |
 
-数据保存在 `App_Data`（或 `Soford__DataPath`）：`products.json`、`publish-jobs.json`、`alibaba-accounts.json`（各账号授权，加密）、`users.json`、`audit-log.json`、`inquiries.json`、`automation.json`、`alibaba-api-logs.json`、`category-attributes.json`，以及加密用的 `data-protection-keys/`。
+数据保存在 `App_Data`（或 `Soford__DataPath`）：`products.json`、`publish-jobs.json`、`alibaba-accounts.json`（各账号授权，加密）、`users.json`、`audit-log.json`、`inquiries.json`、`website-profile.json`（官网公司、联系人和 FAQ）、`automation.json`、`alibaba-api-logs.json`、`category-attributes.json`，以及加密用的 `data-protection-keys/`。
+
+## 官网与 ERP 的当前衔接
+
+- 官网路径配置入口为 `https://stepnex.cn/soford/`，ERP 为 `https://stepnex.cn/erp/`；本轮未验证线上实际版本与可用性。
+- 官网与 ERP 共用商品库：online 且有图的商品按清理后的标题去重、按关键词分类；ERP 保存后官网刷新即生效，“未发布修改”仅指尚未更新 Alibaba。官网发布确认和人工展示管理为待办。
+- 公司、联系人和 FAQ 在 ERP「官网」维护，保存为 `website-profile.json`。当前运营也能修改；专门权限限制、全站文案同步和并发保护待修复。
+- ERP「询盘」已有搜索、分页、状态、备注和角标；当前全员共享，无内置导出/归档，满 20,000 条会淘汰最早记录。“用邮件回复”打开邮件客户端，不自动发送。
 
 ## 本地运行
 
@@ -63,6 +74,8 @@ cd WebSofordRep; npm install; npm run dev
 dotnet test SofordRepApi.Tests
 cd WebSofordRep; npm run lint; npm run build
 ```
+
+官网检查另执行 `node --test SofordWebsite/tests/*.test.mjs`，步骤见 [官网说明](SofordWebsite/README.md)。本地测试结果不替代 R1–R8 的逐项回归和服务器验收。
 
 每次推送到 `main` 和每个 Pull Request，GitHub Actions 会自动运行上述检查，并检查部署脚本、systemd 和 nginx 配置。依赖更新由 Dependabot 每周提出。
 

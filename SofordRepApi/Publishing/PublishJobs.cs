@@ -29,6 +29,7 @@ public static class JobKinds
     public const string Predict = "predict";
     public const string Refresh = "refresh";
     public const string RefreshDiscard = "refresh-discard";
+    public const string Detail = "detail";
 
     public static readonly IReadOnlyDictionary<string, string> Labels = new Dictionary<string, string>
     {
@@ -40,7 +41,8 @@ public static class JobKinds
         [Offline] = "下架",
         [Predict] = "预测类目",
         [Refresh] = "从 Alibaba 刷新",
-        [RefreshDiscard] = "放弃修改并刷新"
+        [RefreshDiscard] = "放弃修改并刷新",
+        [Detail] = "拉取详情"
     };
 }
 
@@ -267,6 +269,7 @@ public sealed class PublishWorker(
         JobKinds.Predict => [await operations.PredictCategoryAsync(ids[0])],
         JobKinds.Refresh => [await operations.RefreshContentAsync(ids[0], discardLocalChanges: false)],
         JobKinds.RefreshDiscard => [await operations.RefreshContentAsync(ids[0], discardLocalChanges: true)],
+        JobKinds.Detail => [await operations.PullDetailAsync(ids[0])],
         _ => [await operations.PublishAsync(ids[0])]
     };
 

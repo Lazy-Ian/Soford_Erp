@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDownToLine, ArrowUpFromLine, CheckCircle2, CloudDownload, Download, FileSpreadsheet, Layers3, PackageCheck, Pencil,
+  ArrowDownToLine, ArrowUpFromLine, CheckCircle2, CloudDownload, Download, FileSpreadsheet, FileText, Layers3, PackageCheck, Pencil,
   Plus, RefreshCw, Rocket, Search, Tags, Trash2, Upload, Warehouse, DollarSign,
 } from 'lucide-react'
 import clsx from 'clsx'
@@ -211,6 +211,19 @@ export function ProductsPage() {
       onConfirm: () => void startJob(choice.discard ? 'refresh-discard' : 'refresh'),
     })
   }
+
+  const pullDetail = () =>
+    confirm({
+      title: '拉取商品详情',
+      confirmText: '开始拉取',
+      message: (
+        <>
+          <p>从 Alibaba 读取选中的 {publishedSelected} 个已发布商品的详情描述，只更新本地「描述」。标题、价格、图片和库存保持不变。</p>
+          <p className="muted">用详情编辑器制作的商品，接口经常不返回正文，结果里会单独标明。本地已有描述且还有未发布修改时，不会覆盖。</p>
+        </>
+      ),
+      onConfirm: () => void startJob('detail'),
+    })
 
   const confirmJob = (kind: 'inventory' | 'price' | 'predict') => {
     const count = kind === 'predict' ? selectedIds.length : publishedSelected
@@ -454,6 +467,9 @@ export function ProductsPage() {
         </button>
         <button type="button" onClick={refreshFromAlibaba} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint ?? '取回 Alibaba 上的最新内容；在 Alibaba 后台改过的商品，更新前要先刷新'}>
           {busy === 'refresh' || busy === 'refresh-discard' ? <Spinner /> : <CloudDownload size={16} />} 从 Alibaba 刷新
+        </button>
+        <button type="button" onClick={pullDetail} disabled={!publishedSelected || busy !== null || needsAlibaba} title={alibabaHint ?? '只拉取详情描述，不改标题、价格、图片和库存'}>
+          {busy === 'detail' ? <Spinner /> : <FileText size={16} />} 拉取详情
         </button>
         <button type="button" onClick={() => confirmJob('inventory')} disabled={!stockSelected || busy !== null || needsAlibaba} title={alibabaHint ?? (stockSelected ? undefined : '选中的商品本地库存都是 0（B2B 商品通常不管库存），没有可同步的库存')}>
           {busy === 'inventory' ? <Spinner /> : <Warehouse size={16} />} 同步库存

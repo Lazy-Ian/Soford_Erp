@@ -27,9 +27,19 @@ sudo nginx -t
 sudo systemctl reload nginx
 sudo systemctl restart soford-erp-api
 sleep 2
-curl -sS -o /dev/null -w "website_index=%{http_code}\n" -H "Host: stepnex.cn" --resolve stepnex.cn:443:127.0.0.1 https://stepnex.cn/soford/ || true
-curl -sS -o /dev/null -w "inquiry_post=%{http_code}\n" -X POST -H "Host: stepnex.cn" -H "Origin: https://stepnex.cn" \
+curl -fsS --max-time 30 -o /dev/null -w "website_index=%{http_code}\n" -H "Host: stepnex.cn" --resolve stepnex.cn:443:127.0.0.1 https://stepnex.cn/soford/
+curl -fsS --max-time 30 -H 'Origin: https://stepnex.cn' --resolve stepnex.cn:443:127.0.0.1 https://stepnex.cn/soford/public/site \
+  | python3 -c 'import json,sys; p=json.load(sys.stdin); assert isinstance(p["contacts"], list)'
+products_code=$(curl -fsS --max-time 30 -o /dev/null -w "%{http_code}" -H "Host: stepnex.cn" -H "Origin: https://stepnex.cn" \
+  --resolve stepnex.cn:443:127.0.0.1 \
+  https://stepnex.cn/soford/public/products)
+echo "products_get=$products_code"
+if [ "$products_code" != "200" ]; then
+  echo "public products endpoint did not return 200" >&2
+  exit 1
+fi
+curl -fsS --max-time 30 -X POST -H "Host: stepnex.cn" -H "Origin: https://stepnex.cn" \
   -H "Content-Type: application/json" \
   --resolve stepnex.cn:443:127.0.0.1 \
-  -d '{"name":"Deploy Smoke","email":"smoke@example.com","message":"Deployment smoke test inquiry.","website":""}' \
-  https://stepnex.cn/soford/public/inquiries || true
+  -d '{"website":"deployment-honeypot"}' \
+  https://stepnex.cn/soford/public/inquiries | python3 -c 'import json,sys; assert json.load(sys.stdin)["received"] is True'

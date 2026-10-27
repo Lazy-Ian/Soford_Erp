@@ -14,6 +14,10 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
     private readonly string _file = paths.File("products.json");
     private readonly SemaphoreSlim _lock = new(1, 1);
     private List<ProductRecord>? _cache;
+    private long _generation;
+
+    /// <summary>Bumps after each successful write so readers can drop a derived cache.</summary>
+    public long Generation => Interlocked.Read(ref _generation);
 
     public async Task<List<ProductRecord>> GetAllAsync()
     {
@@ -314,6 +318,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
             {
                 var result = change(all);
                 await JsonFile.WriteAtomicAsync(_file, all, JsonFile.Compact);
+                Interlocked.Increment(ref _generation);
                 return result is ProductRecord product ? (T)(object)product.Copy() : result;
             }
             catch

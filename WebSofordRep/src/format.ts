@@ -28,6 +28,7 @@ export const jobKindLabel: Record<string, string> = {
   predict: '预测类目',
   refresh: '从 Alibaba 刷新',
   'refresh-discard': '放弃修改并刷新',
+  detail: '拉取详情',
 }
 
 export const jobStatusLabel: Record<PublishJobStatus, string> = {

@@ -19,7 +19,7 @@ Alibaba.com 国际站（ICBU）商品管理工作台 + 英文官网询盘。改�
 | `SofordRepApi/` | ASP.NET Core 8 Minimal API：`Alibaba/`、`Catalog/`、`Publishing/`、`Infrastructure/`、`Endpoints/`、`Website/` |
 | `SofordRepApi.Tests/` | xUnit（签名、映射、导入、质检、权限、询盘、更新安全） |
 | `WebSofordRep/` | React 19 + Vite 管理端（中文 UI） |
-| `SofordWebsite/` | 纯静态英文官网；`data/products.js` 由脚本导出，勿手改 |
+| `SofordWebsite/` | 纯静态英文官网；商品目录读 ERP 的 `products.json`（`/public/products`），不要另存一份 |
 | `deploy/` | Ubuntu Nginx + systemd（无 Docker 生产路径） |
 | `docs/` | PRD / 技术方案 / 实施 / 优化计划 |
 
@@ -45,7 +45,7 @@ Alibaba.com 国际站（ICBU）商品管理工作台 + 英文官网询盘。改�
 | 用户 / 审计 / 限流 | `Infrastructure/*` |
 | 询盘 API | `Website/Inquiries.cs` |
 | 管理端页面 | `WebSofordRep/src/pages/*`, `api.ts` |
-| 官网表单 / 商品导出 | `SofordWebsite/assets/site.js`, `scripts/export-products.mjs` |
+| 官网表单 / 商品目录 / 联系人 | `SofordWebsite/assets/site.js`, `SofordRepApi/Website/WebsiteCatalog.cs`, `Website/WebsiteProfile.cs` |
 | 部署 | `deploy/DEPLOY_UBUNTU.md`, `deploy/nginx/*` |
 
 ## 本地与验证
@@ -69,6 +69,7 @@ dotnet build SofordRepApi -c Release -warnaserror
 dotnet test SofordRepApi.Tests -c Release
 cd WebSofordRep; npm run lint; npm run build
 node --check SofordWebsite/assets/site.js
+node --check SofordWebsite/scripts/detail-html.mjs
 node --test SofordWebsite/tests/*.test.mjs
 ```
 
@@ -78,8 +79,8 @@ CI（`.github/workflows/ci.yml`）覆盖上述 + deploy shell/systemd/nginx。
 
 - 不要对生产 `App_Data` 做破坏性操作；验收用隔离目录（如 `.test-results/`），且勿把测试数据当业务数据提交。
 - 不要在未授权/无用户确认时调用真实 Alibaba **写入**接口。
-- 官网 `SITE` 联系信息与 FAQ 承诺以业务方提供为准，占位勿当真实数据写死上线。
-- `SofordWebsite/data/products.js`：只通过 `node SofordWebsite/scripts/export-products.mjs` 更新。
+- 官网联系人、地址、国际站链接和 FAQ 文案在 ERP「官网」页维护（`website-profile.json`）。`site.js` 里的 `SITE` 只是接口不可用时的兜底，占位勿当真实数据写死上线。
+- 官网商品与 ERP 共用 `products.json`。页面读 `/public/products`，不要再手改或导出 `data/products.js`。
 
 ## 文档索引
 

@@ -79,7 +79,7 @@ Alibaba ICBU OpenAPI  https://openapi-api.alibaba.com/rest
 
 ## 官网
 
-- `SITE` / `CATEGORIES` 在 `assets/site.js`
+- 联系人、地址、国际站链接和 FAQ 文案在 ERP「官网」页，存 `website-profile.json`，官网读 `GET /public/site`。`SITE` / `CATEGORIES` 在 `assets/site.js`（API 不可用时的兜底）
 - 导出：只导出 Alibaba `online` 商品，按标题去重并归入产品线
 - 本地询盘：从 `localhost:5180` 提交到 `http://localhost:5153/public/inquiries`；生产用同源路径 + `Website__AllowedOrigins`
 - 询盘最多约 20,000 条，超出淘汰最早记录

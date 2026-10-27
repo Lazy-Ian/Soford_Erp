@@ -297,6 +297,52 @@ public sealed class ProductOperations(
         return new(productId, product.Sku, true, $"已取回 Alibaba 最新内容{variants}", product.RemoteProductId, "refresh");
     }
 
+    /// <summary>
+    /// Copies only the detail description from product.get. Title, price, images and stock stay as they are locally.
+    /// An empty description (detail-editor listings) is not written over a local one.
+    /// </summary>
+    public async Task<OperationItemResult> PullDetailAsync(Guid productId)
+    {
+        using var _ = await locks.AcquireAsync(productId);
+        var (product, error) = await LoadPublishedAsync(productId);
+        if (product is null) return error!;
+
+        var (remote, result) = await ReadRemoteAsync(product, await AccountForAsync(product));
+        if (remote is null)
+        {
+            var reason = result.Success ? "Alibaba 没有返回商品详情。" : AlibabaErrors.Explain(result);
+            return new(productId, product.Sku, false, reason, product.RemoteProductId, "detail");
+        }
+
+        var description = remote.Description.Trim();
+        if (description.Length == 0)
+        {
+            await products.UpdateAsync(productId, p => p.ContentRefreshedAt = time.GetUtcNow());
+            return new(productId, product.Sku, false, "阿里未返回详情正文（通常是在卖家后台用详情编辑器制作的），本地描述未改。", product.RemoteProductId, "detail");
+        }
+
+        if (string.Equals(product.Description.Trim(), description, StringComparison.Ordinal))
+        {
+            await products.UpdateAsync(productId, p => p.ContentRefreshedAt = time.GetUtcNow());
+            return new(productId, product.Sku, true, "详情与本地一致。", product.RemoteProductId, "detail");
+        }
+
+        if (product.HasUnpublishedChanges && !string.IsNullOrWhiteSpace(product.Description))
+        {
+            return new(productId, product.Sku, false, "本地有未发布的修改，已保留现有描述。要改用阿里上的详情，请用「从 Alibaba 刷新」。", product.RemoteProductId, "detail");
+        }
+
+        var lookup = await quality.LoadCategoryLookupAsync();
+        var now = time.GetUtcNow();
+        await products.UpdateAsync(productId, p =>
+        {
+            p.Description = description;
+            p.ContentRefreshedAt = now;
+            ProductQualityService.Apply(p, lookup(p.CategoryId));
+        });
+        return new(productId, product.Sku, true, $"已拉取详情（{description.Length} 个字符）。", product.RemoteProductId, "detail");
+    }
+
     private const int MaxLookupPages = 15;
 
     private static PublishState RestorableState(PublishState state) => state == PublishState.Publishing ? PublishState.Pending : state;

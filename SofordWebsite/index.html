@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/site.css">
+  <link rel="stylesheet" href="assets/site.css?v=20261027">
 </head>
 <body data-page="home">
 
@@ -18,47 +18,52 @@
   <div class="wrap">
     <a class="logo" href="index.html" aria-label="Soford home">
       <img class="logo-img" src="assets/logo.png" alt="SOFORD" width="179" height="155">
-      <span class="logo-tag">Rubber &amp; Sports<br>Flooring</span>
+      <span class="logo-tag" data-i18n-html="logo.tag">Rubber &amp; Sports<br>Flooring</span>
     </a>
     <nav class="nav" aria-label="Main">
-      <a href="products.html">Products</a>
-      <a href="#applications">Applications</a>
-      <a href="#why">Why Soford</a>
-      <a href="#process">How We Work</a>
-      <a href="#faq">FAQ</a>
+      <div class="nav-products">
+        <a href="products.html" data-i18n="nav.products">Products</a>
+        <div class="mega" data-mega></div>
+      </div>
+      <a href="#applications" data-i18n="nav.apps">Applications</a>
+      <a href="#why" data-i18n="nav.factory">Factory</a>
+      <a href="#faq" data-i18n="nav.faq">FAQ</a>
     </nav>
-    <a class="btn btn-primary btn-sm header-cta" href="#contact">Get a quote</a>
-    <button class="menu-toggle" type="button" aria-label="Menu" aria-expanded="false">
+    <a class="btn btn-primary btn-sm header-cta" href="#contact" data-i18n="nav.quote">Get a quote</a>
+    <button class="menu-toggle" type="button" data-i18n-aria="menu.aria" aria-label="Menu" aria-expanded="false">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
     </button>
   </div>
 </header>
 
 <main>
-  <section class="hero fleck">
+  <section class="hero">
     <div class="wrap hero-grid">
       <div>
-        <span class="eyebrow">Factory direct · Shandong, China</span>
-        <h1>Floors built to take a <em>beating.</em></h1>
-        <p class="lead">Soford manufactures rubber gym flooring, outdoor safety surfaces, artificial grass and EVA mats for gyms, contractors and distributors worldwide — with your size, colour and logo.</p>
+        <span class="eyebrow" data-i18n="hero.eyebrow">Factory direct · Shandong, China</span>
+        <h1 data-i18n-html="hero.title">Floors built to take a <em>beating.</em></h1>
+        <p class="lead" data-i18n="hero.lead">Soford manufactures rubber gym flooring, outdoor safety surfaces, artificial grass and EVA mats for gyms, contractors and distributors worldwide — with your size, colour and logo.</p>
+        <p class="hero-proof" data-i18n="hero.proof">OEM colour &amp; logo · FOB Qingdao · Sample fee offset on the first order</p>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="products.html">Browse products</a>
-          <a class="btn btn-ghost" href="#contact">Request a free quote</a>
+          <a class="btn btn-primary" href="#contact" data-i18n="hero.quote">Request a free quote</a>
+          <a class="btn btn-ghost" href="products.html" data-i18n="hero.browse">Browse products</a>
         </div>
       </div>
       <div class="hero-visual">
-        <img alt="Rubber gym flooring tiles" referrerpolicy="no-referrer">
-        <img alt="Artificial grass" referrerpolicy="no-referrer">
-        <img alt="Outdoor playground rubber flooring" referrerpolicy="no-referrer">
+        <img class="hero-main" alt="Rubber gym flooring tiles" referrerpolicy="no-referrer">
+        <img class="hero-swatch" alt="Artificial grass" referrerpolicy="no-referrer">
+        <img class="hero-swatch" alt="Outdoor playground rubber flooring" referrerpolicy="no-referrer">
       </div>
     </div>
+  </section>
+  <section class="stats-band">
     <div class="wrap">
       <div class="stats">
-        <div class="stat"><b data-stat="products">800+</b><span>Product models</span></div>
-        <div class="stat"><b data-stat="lines">5</b><span>Product lines</span></div>
-        <div class="stat"><b>SGS · REACH</b><span>Tested materials</span></div>
-        <div class="stat"><b>7–20 days</b><span>Production lead time</span></div>
-        <div class="stat"><b>100 m²</b><span>Minimum order from</span></div>
+        <div class="stat"><b data-stat="products">800+</b><span data-i18n="stats.models">Product models</span></div>
+        <div class="stat"><b data-stat="lines">5</b><span data-i18n="stats.lines">Product lines</span></div>
+        <div class="stat"><b data-term="warranty">SGS · REACH</b><span data-i18n="stats.tested">Tested materials</span></div>
+        <div class="stat"><b dir="ltr" data-term="leadTime">7–20</b><span data-i18n="stats.lead">Days after deposit</span></div>
+        <div class="stat"><b dir="ltr" data-term="moq">100 m²</b><span data-i18n="stats.moq">Rubber mat MOQ from</span></div>
       </div>
     </div>
   </section>
@@ -67,97 +72,86 @@
     <div class="wrap">
       <div class="section-head">
         <div>
-          <span class="eyebrow">Product lines</span>
-          <h2>One factory for every surface.</h2>
+          <span class="eyebrow" data-i18n="lines.eyebrow">Product lines</span>
+          <h2 data-i18n="lines.title">One factory for every surface.</h2>
         </div>
-        <p>From 4 mm rolls to 50 mm deadlift tiles, from football turf to taekwondo mats — choose a line to see every model, size and price.</p>
+        <p data-i18n="lines.lead">From 4 mm rolls to 50 mm deadlift tiles, from football turf to taekwondo mats — choose a line to see every model, size and price.</p>
       </div>
       <div class="cats" data-cats></div>
     </div>
   </section>
 
-  <section class="section" style="padding-top: 0">
+  <section class="section section-follow">
     <div class="wrap">
       <div class="section-head">
         <div>
-          <span class="eyebrow">Popular now</span>
-          <h2>Best-selling models</h2>
+          <span class="eyebrow" data-i18n="popular.eyebrow">Popular now</span>
+          <h2 data-i18n="popular.title">Best-selling models</h2>
         </div>
-        <a class="btn btn-dark" href="products.html">View all products</a>
+        <a class="btn btn-line" href="products.html" data-i18n="popular.all">View all products</a>
       </div>
       <div class="grid" data-featured></div>
     </div>
   </section>
 
-  <section class="section" id="applications" style="padding-top: 0">
+  <section class="section section-follow" id="applications">
     <div class="wrap">
       <div class="section-head">
         <div>
-          <span class="eyebrow">Applications</span>
-          <h2>Where our floors go to work</h2>
+          <span class="eyebrow" data-i18n="apps.eyebrow">Applications</span>
+          <h2 data-i18n="apps.title">Where our floors go to work</h2>
         </div>
-        <p>Every order is built for the space it will live in — load, impact, weather and footfall.</p>
+        <p data-i18n="apps.lead">Every order is built for the space it will live in — load, impact, weather and footfall.</p>
       </div>
-      <div class="apps">
-        <div class="app">
-          <div class="app-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 7v10M18 7v10M3 10v4M21 10v4M6 12h12"/></svg></div>
-          <h3>Commercial gyms &amp; CrossFit</h3>
-          <p>Shock-absorbing tiles and rolls that protect slabs and equipment under dropped weights.</p>
-          <div class="chips"><span class="chip">15–50 mm tiles</span><span class="chip">EPDM fleck</span></div>
-        </div>
-        <div class="app">
-          <div class="app-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 11l9-7 9 7M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg></div>
-          <h3>Home gyms</h3>
-          <p>Low-odour, easy-install interlocking mats that cut noise and vibration in garages and basements.</p>
-          <div class="chips"><span class="chip">Interlocking</span><span class="chip">Noise reduction</span></div>
-        </div>
-        <div class="app">
-          <div class="app-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="6" r="2.5"/><path d="M12 9v6M8 21l4-6 4 6M7 12h10"/></svg></div>
-          <h3>Playgrounds &amp; schools</h3>
-          <p>Non-toxic, fall-absorbing safety tiles in bright colours that stay put outdoors.</p>
-          <div class="chips"><span class="chip">UV resistant</span><span class="chip">Non-toxic</span></div>
-        </div>
-        <div class="app">
-          <div class="app-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7l4 3-1.5 5h-5L8 10z"/></svg></div>
-          <h3>Football &amp; sports fields</h3>
-          <p>40–50 mm PP+PE turf with stable backing for 5-a-side pitches and training grounds.</p>
-          <div class="chips"><span class="chip">PP+PE yarn</span><span class="chip">4 × 25 m rolls</span></div>
-        </div>
-        <div class="app">
-          <div class="app-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3c-3 4-6 6-6 10a6 6 0 0012 0c0-4-3-6-6-10z"/><path d="M12 21v-6"/></svg></div>
-          <h3>Landscaping &amp; gardens</h3>
-          <p>Natural-looking 25–35 mm lawns for gardens, rooftops, hotels and commercial landscaping.</p>
-          <div class="chips"><span class="chip">6–8 yr warranty</span><span class="chip">Fire resistant</span></div>
-        </div>
-        <div class="app">
-          <div class="app-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><path d="M13 7h4a1 1 0 011 1v3M11 17H7a1 1 0 01-1-1v-3"/></svg></div>
-          <h3>Martial arts studios</h3>
-          <p>High-density EVA tatami for judo, taekwondo and kids' play areas — light, washable, reversible.</p>
-          <div class="chips"><span class="chip">1 × 1 m</span><span class="chip">20–40 mm</span></div>
-        </div>
+      <div class="scenes">
+        <a class="scene" href="products.html?cat=gym-tiles" data-scene="gym">
+          <img alt="" referrerpolicy="no-referrer">
+          <div><b data-i18n="app.gym.metric">15–50 mm</b><h3 data-i18n="app.gym.title">Commercial gyms &amp; CrossFit</h3></div>
+        </a>
+        <a class="scene" href="products.html?cat=gym-tiles" data-scene="home">
+          <img alt="" referrerpolicy="no-referrer">
+          <div><b data-i18n="app.home.metric">Interlocking</b><h3 data-i18n="app.home.title">Home gyms</h3></div>
+        </a>
+        <a class="scene" href="products.html?cat=outdoor-playground" data-scene="play">
+          <img alt="" referrerpolicy="no-referrer">
+          <div><b data-i18n="app.play.metric">UV / non-toxic</b><h3 data-i18n="app.play.title">Playgrounds &amp; schools</h3></div>
+        </a>
+        <a class="scene" href="products.html?cat=artificial-grass" data-scene="field">
+          <img alt="" referrerpolicy="no-referrer">
+          <div><b data-i18n="app.field.metric">40–50 mm</b><h3 data-i18n="app.field.title">Football &amp; sports fields</h3></div>
+        </a>
+        <a class="scene" href="products.html?cat=artificial-grass" data-scene="garden">
+          <img alt="" referrerpolicy="no-referrer">
+          <div><b data-i18n="app.garden.metric">25–35 mm</b><h3 data-i18n="app.garden.title">Landscaping &amp; gardens</h3></div>
+        </a>
+        <a class="scene" href="products.html?cat=eva-mats" data-scene="martial">
+          <img alt="" referrerpolicy="no-referrer">
+          <div><b data-i18n="app.martial.metric">20–40 mm</b><h3 data-i18n="app.martial.title">Martial arts studios</h3></div>
+        </a>
       </div>
     </div>
   </section>
 
-  <section class="section fleck" id="why">
+  <section class="section" id="why">
     <div class="wrap why">
       <div>
-        <span class="eyebrow" style="color:#8fdc86">Why Soford</span>
-        <h2>A manufacturer, not a middleman.</h2>
-        <p class="lead">We compound, mould, cut and pack in-house, so you get consistent quality, honest lead times and prices that scale with your volume.</p>
+        <span class="eyebrow" data-i18n="why.eyebrow">Why Soford</span>
+        <h2 data-i18n="why.title">A manufacturer, not a middleman.</h2>
+        <p class="lead" data-i18n="why.lead">We compound, mould, cut and pack in-house, so you get consistent quality, honest lead times and prices that scale with your volume.</p>
         <div class="cert-row">
-          <div class="cert">SGS<small>Material testing</small></div>
-          <div class="cert">REACH<small>EU compliance</small></div>
-          <div class="cert">OEM<small>Your brand</small></div>
+          <div class="cert"><span data-i18n="cert.sgs">SGS</span><small data-i18n="cert.sgsSub">Material testing</small></div>
+          <div class="cert"><span data-i18n="cert.reach">REACH</span><small data-i18n="cert.reachSub">EU compliance</small></div>
+          <div class="cert"><span data-i18n="cert.oem">OEM</span><small data-i18n="cert.oemSub">Your brand</small></div>
         </div>
+        <p class="why-note" data-i18n="why.reports">Artificial grass and rubber flooring: 6–8 year warranty.</p>
       </div>
       <div class="why-list">
-        <div class="why-item"><b>Fully customisable</b><p>Thickness, size, colour, fleck ratio, surface texture and logo embossing — made to your spec.</p></div>
-        <div class="why-item"><b>Tiered factory pricing</b><p>Transparent volume pricing from the first pallet, better rates for distributors and repeat orders.</p></div>
-        <div class="why-item"><b>Safe materials</b><p>Non-toxic, low-odour EPDM and SBR compounds, fire-protection grades available.</p></div>
-        <div class="why-item"><b>Export-ready packing</b><p>Palletised, wrapped and labelled for sea freight, with loading photos before departure.</p></div>
-        <div class="why-item"><b>Cutting service</b><p>Rolls cut to your room lengths to reduce waste and installation time on site.</p></div>
-        <div class="why-item"><b>Samples before you commit</b><p>Check colour, density and smell in your hands before placing a production order.</p></div>
+        <div class="why-item"><b data-i18n="why.custom.title">Fully customisable</b><p data-i18n="why.custom.body">Thickness, size, colour, fleck ratio, surface texture and logo embossing — made to your spec.</p></div>
+        <div class="why-item"><b data-i18n="why.price.title">Tiered factory pricing</b><p data-i18n="why.price.body">Transparent volume pricing from the first pallet, better rates for distributors and repeat orders.</p></div>
+        <div class="why-item"><b data-i18n="why.safe.title">Safe materials</b><p data-i18n="why.safe.body">Non-toxic, low-odour EPDM and SBR compounds, fire-protection grades available.</p></div>
+        <div class="why-item"><b data-i18n="why.pack.title">Export-ready packing</b><p data-i18n="why.pack.body">Palletised, wrapped and labelled for sea freight, with loading photos before departure.</p></div>
+        <div class="why-item"><b data-i18n="why.cut.title">Cutting service</b><p data-i18n="why.cut.body">Rolls cut to your room lengths to reduce waste and installation time on site.</p></div>
+        <div class="why-item"><b data-i18n="why.sample.title">Samples before you commit</b><p data-i18n="why.sample.body">The sample fee is deducted from your first order.</p></div>
       </div>
     </div>
   </section>
@@ -166,92 +160,98 @@
     <div class="wrap">
       <div class="section-head">
         <div>
-          <span class="eyebrow">How we work</span>
-          <h2>From inquiry to your warehouse</h2>
+          <span class="eyebrow" data-i18n="process.eyebrow">How we work</span>
+          <h2 data-i18n="process.title">From inquiry to your warehouse</h2>
         </div>
-        <p>A clear, six-step process with one sales contact from first message to delivery.</p>
+        <p data-i18n="process.lead">A clear, six-step process with one sales contact from first message to delivery.</p>
       </div>
       <div class="steps">
-        <div class="step"><h3>Inquiry</h3><p>Tell us the product, size, quantity and destination port.</p></div>
-        <div class="step"><h3>Quote &amp; sample</h3><p>We reply with pricing and send samples for approval.</p></div>
-        <div class="step"><h3>Confirm order</h3><p>Final spec, packing and artwork confirmed in a PI.</p></div>
-        <div class="step"><h3>Production</h3><p>7–20 days depending on product and volume.</p></div>
-        <div class="step"><h3>Quality check</h3><p>Thickness, density and finish inspected; photos sent to you.</p></div>
-        <div class="step"><h3>Shipping</h3><p>FOB, CIF or door-to-door with full export documents.</p></div>
+        <div class="step"><h3 data-i18n="step.1.title">Inquiry</h3><p data-i18n="step.1.body">Tell us the product, size, quantity and destination port.</p><p class="step-need" data-i18n="step.1.need">Have ready: product, size, quantity, port</p></div>
+        <div class="step"><h3 data-i18n="step.2.title">Quote &amp; sample</h3><p data-i18n="step.2.body">We verify the details, then send the quotation. The sample fee is deducted from the first order.</p><p class="step-need" data-i18n="step.2.need">You approve the quotation and the sample</p></div>
+        <div class="step"><h3 data-i18n="step.3.title">Confirm order</h3><p data-i18n="step.3.body">Final spec, packing and artwork confirmed in a PI.</p><p class="step-need" data-i18n="step.3.need">You confirm the PI</p></div>
+        <div class="step"><h3 data-i18n="step.4.title">Production</h3><p data-i18n="step.4.body">7–20 days after the deposit is received.</p><p class="step-need" data-i18n="step.4.need">We produce 7–20 days after deposit</p></div>
+        <div class="step"><h3 data-i18n="step.5.title">Quality check</h3><p data-i18n="step.5.body">Thickness, density and finish inspected; photos sent to you.</p><p class="step-need" data-i18n="step.5.need">You review inspection photos</p></div>
+        <div class="step"><h3 data-i18n="step.6.title">Shipping</h3><p data-i18n="step.6.body">FOB Qingdao.</p><p class="step-need" data-i18n="step.6.need">Terms are FOB Qingdao</p></div>
       </div>
     </div>
   </section>
 
-  <section class="section" id="faq" style="padding-top: 0">
+  <section class="section section-follow" id="faq">
     <div class="wrap faq">
       <div>
-        <span class="eyebrow">FAQ</span>
-        <h2>Questions buyers ask us</h2>
+        <span class="eyebrow" data-i18n="faq.eyebrow">FAQ</span>
+        <h2 data-i18n="faq.title">Questions buyers ask us</h2>
       </div>
-      <div>
+      <div class="faq-panel">
         <details open>
-          <summary>What is your minimum order quantity?</summary>
-          <p>Most rubber flooring starts at 100–200 m², EVA mats at 200 pieces and artificial grass at 1,000 m². Mixed products can be combined in one container — ask us.</p>
+          <summary data-i18n="faq.1.q">What is your minimum order quantity?</summary>
+          <p data-i18n="faq.1.a" data-term="moq">Rubber mats start at 100–200 m², EVA mats at 200 pieces, and artificial grass at 1,000 m².</p>
         </details>
         <details>
-          <summary>Can you put our logo and colours on the product?</summary>
-          <p>Yes. We offer custom colours, EPDM fleck percentages, sizes and thicknesses, plus logo embossing or printing on tiles and private-label packaging.</p>
+          <summary data-i18n="faq.2.q">Can you put our logo and colours on the product?</summary>
+          <p data-i18n="faq.2.a">Yes. We offer custom colours, EPDM fleck percentages, sizes and thicknesses, plus logo embossing or printing on tiles and private-label packaging.</p>
         </details>
         <details>
-          <summary>Do you provide samples?</summary>
-          <p>Yes. Small samples are available for colour and quality checks; you only cover courier cost, which is credited against your first order.</p>
+          <summary data-i18n="faq.3.q">Do you provide samples?</summary>
+          <p data-i18n="faq.3.a" data-term="sample">Yes. The sample fee is deducted from your first order.</p>
         </details>
         <details>
-          <summary>How long does production and shipping take?</summary>
-          <p>Production is usually 7–20 days after deposit. Sea freight time depends on your port; we can quote FOB Qingdao, CIF or door-to-door.</p>
+          <summary data-i18n="faq.4.q">How long does production take?</summary>
+          <p data-i18n="faq.4.a" data-term="lead">Production takes 7–20 days after the deposit is received. Trade terms are FOB Qingdao.</p>
         </details>
         <details>
-          <summary>What certifications do your materials have?</summary>
-          <p>Our materials are SGS tested and selected products meet EU REACH requirements. Test reports are available on request.</p>
+          <summary data-i18n="faq.5.q">What certifications and warranty do you offer?</summary>
+          <p data-i18n="faq.5.a" data-term="warranty">SGS and REACH. Artificial grass and rubber flooring have a 6–8 year warranty.</p>
         </details>
         <details>
-          <summary>What payment terms do you accept?</summary>
-          <p>T/T (30% deposit, balance before shipment), L/C at sight and Alibaba Trade Assurance.</p>
+          <summary data-i18n="faq.6.q">What payment terms do you accept?</summary>
+          <p data-i18n="faq.6.a" data-term="payment">30% T/T deposit.</p>
         </details>
       </div>
     </div>
   </section>
 
-  <section class="section" id="contact" style="padding-top: 0">
+  <section class="section section-follow" id="contact">
     <div class="wrap contact">
-      <div class="contact-info fleck">
-        <span class="eyebrow" style="color:#8fdc86">Contact</span>
-        <h2 data-claim="reply-sla">Get a quote within 24 hours.</h2>
-        <p class="lead">Send us your product, size and quantity — our export team replies with pricing, lead time and freight options.</p>
-        <div class="contact-line">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>
-          <div><small>Email</small><a data-site="email"></a></div>
+      <div class="contact-info">
+        <span class="eyebrow" data-i18n="contact.eyebrow">Contact</span>
+        <h2 data-claim="reply-sla" data-i18n="contact.sla">Quotation available after verification.</h2>
+        <p class="lead" data-i18n="contact.lead">Send us your product, size and quantity. We quote after we verify the details.</p>
+        <div data-contacts></div>
+        <div class="contact-line" data-site-optional>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20V6l8-3 8 3v14M4 20h16M9 20v-5h6v5"/></svg>
+          <div><small data-i18n="contact.company">Company</small><span data-site="company"></span></div>
         </div>
         <div class="contact-line" data-site-optional>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 005 5L15 13l5 2v4a2 2 0 01-2 2A16 16 0 013 6a2 2 0 012-2"/></svg>
-          <div><small>Phone</small><a data-site="phone"></a></div>
-        </div>
-        <div class="contact-line" data-site-optional>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21l1.6-4.8A9 9 0 1112 21a9 9 0 01-4.2-1z"/></svg>
-          <div><small>WhatsApp</small><a data-site="whatsapp" target="_blank" rel="noopener"></a></div>
-        </div>
-        <div class="contact-line">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21s-7-6.5-7-12a7 7 0 0114 0c0 5.5-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>
-          <div><small>Factory</small><span data-site="address"></span></div>
+          <div><small data-i18n="contact.factory">Location</small><span data-site="address"></span></div>
         </div>
       </div>
       <form class="form" id="inquiry">
-        <div class="field"><label for="f-name">Your name *</label><input id="f-name" name="name" required maxlength="100" autocomplete="name"></div>
-        <div class="field"><label for="f-company">Company</label><input id="f-company" name="company" maxlength="200" autocomplete="organization"></div>
-        <div class="field"><label for="f-email">Email *</label><input id="f-email" name="email" type="email" required maxlength="200" autocomplete="email"></div>
-        <div class="field"><label for="f-country">Country</label><input id="f-country" name="country" maxlength="100" autocomplete="country-name"></div>
-        <div class="field"><label for="f-product">Product</label><select id="f-product" name="product"></select></div>
-        <div class="field"><label for="f-qty">Quantity</label><input id="f-qty" name="quantity" maxlength="100" placeholder="e.g. 500 m² / 1 container"></div>
-        <div class="field full"><label for="f-msg">Message *</label><textarea id="f-msg" name="message" required minlength="10" maxlength="5000" placeholder="Thickness, size, colour, destination port…"></textarea></div>
+        <div class="field full buyer-type">
+          <span id="buyer-label" data-i18n="form.buyer">I am a</span>
+          <div class="segments" role="radiogroup" aria-labelledby="buyer-label">
+            <label><input type="radio" name="buyerType" value="distributor"> <span data-i18n="form.buyer.distributor">Distributor</span></label>
+            <label><input type="radio" name="buyerType" value="contractor"> <span data-i18n="form.buyer.contractor">Contractor</span></label>
+            <label><input type="radio" name="buyerType" value="project"> <span data-i18n="form.buyer.project">Project owner</span></label>
+          </div>
+        </div>
+        <div class="field"><label for="f-name" data-i18n="form.name">Your name *</label><input id="f-name" name="name" required maxlength="100" autocomplete="name"></div>
+        <div class="field"><label for="f-company" data-i18n="form.company">Company</label><input id="f-company" name="company" maxlength="200" autocomplete="organization"></div>
+        <div class="field"><label for="f-email" data-i18n="form.email">Email *</label><input id="f-email" name="email" type="email" required maxlength="200" autocomplete="email"></div>
+        <div class="field"><label for="f-country" data-i18n="form.country">Country</label><input id="f-country" name="country" maxlength="100" autocomplete="country-name"></div>
+        <div class="field"><label for="f-product" data-i18n="form.product">Product</label><select id="f-product" name="product"></select></div>
+        <div class="field"><label for="f-qty" data-i18n="form.qty">Quantity</label><input id="f-qty" name="quantity" maxlength="100" data-i18n-placeholder="form.qtyPh" placeholder="e.g. 500 m² / 1 container"></div>
+        <div class="field full"><label for="f-msg" data-i18n="form.msg">Message *</label><textarea id="f-msg" name="message" required minlength="10" maxlength="5000" data-i18n-placeholder="form.msgPh" placeholder="Thickness, size, colour, destination port…"></textarea></div>
         <div hidden aria-hidden="true"><label for="f-website">Website</label><input id="f-website" name="website" tabindex="-1" autocomplete="off"></div>
+        <div class="form-confirm" data-confirm>
+          <h3 data-i18n="form.sentTitle">Inquiry received</h3>
+          <p data-confirm-copy></p>
+          <p data-confirm-email></p>
+        </div>
         <div class="form-actions full">
-          <p class="form-note" role="status" aria-live="polite">We never share your details.</p>
-          <button class="btn btn-primary" type="submit">Send inquiry</button>
+          <p class="form-note" role="status" aria-live="polite" data-i18n="form.privacy">We never share your details.</p>
+          <button class="btn btn-primary" type="submit" data-i18n="form.send">Send inquiry</button>
         </div>
       </form>
     </div>
@@ -263,26 +263,30 @@
     <div class="footer-grid">
       <div>
         <a class="logo" href="index.html"><img class="logo-img logo-img-lg" src="assets/logo-white.png" alt="SOFORD" width="179" height="154"></a>
-        <p class="about">Manufacturer and exporter of rubber flooring, sports surfaces, artificial grass and EVA mats, based in Shandong, China.</p>
+        <p class="about" data-i18n="footer.about">Qingdao SoFord Import And Export Co., Ltd. Rubber flooring, sports surfaces, artificial grass and EVA mats, from Qingdao, Shandong, China.</p>
       </div>
-      <div><h4>Products</h4><ul data-footer-cats></ul></div>
-      <div><h4>Company</h4><ul>
-        <li><a href="#why">Why Soford</a></li>
-        <li><a href="#process">How we work</a></li>
-        <li><a href="#faq">FAQ</a></li>
-        <li data-site-optional><a data-site="alibabaStore" data-keep-text target="_blank" rel="noopener">Alibaba store</a></li>
+      <div><h4 data-i18n="footer.products">Products</h4><ul data-footer-cats></ul></div>
+      <div><h4 data-i18n="footer.company">Company</h4><ul>
+        <li><a href="#why" data-i18n="nav.why">Why Soford</a></li>
+        <li><a href="#process" data-i18n="nav.process">How we work</a></li>
+        <li><a href="#faq" data-i18n="nav.faq">FAQ</a></li>
+        <li data-site-optional hidden><a data-site="alibabaStore" data-keep-text data-i18n="footer.alibaba" target="_blank" rel="noopener">Alibaba store</a></li>
       </ul></div>
-      <div><h4>Contact</h4><ul>
-        <li><a data-site="email"></a></li>
-        <li data-site-optional><a data-site="phone"></a></li>
-        <li><a href="#contact">Send an inquiry</a></li>
+      <div><h4 data-i18n="footer.contact">Contact</h4><ul data-footer-contacts>
+        <li data-footer-inquiry><a href="#contact" data-i18n="footer.inquiry">Send an inquiry</a></li>
       </ul></div>
     </div>
-    <div class="footer-bottom"><span>© <span data-year></span> Soford. All rights reserved.</span><span>Made in Shandong, shipped worldwide.</span></div>
+    <div class="footer-bottom"><span>© <span data-year></span> <span data-i18n="footer.rights">Qingdao SoFord Import And Export Co., Ltd. All rights reserved.</span></span><span data-i18n="footer.made">Made in Shandong, shipped worldwide.</span></div>
   </div>
 </footer>
 
-<script src="data/products.js"></script>
-<script src="assets/site.js"></script>
+<nav class="dock" data-i18n-aria="dock.aria" aria-label="Quick actions">
+  <a class="dock-link" href="products.html" data-i18n="nav.products">Products</a>
+  <a class="btn btn-primary" href="#contact" data-i18n="nav.quote">Get a quote</a>
+</nav>
+
+<script src="assets/i18n-extra.js?v=20261027"></script>
+<script src="assets/i18n.js?v=20261027"></script>
+<script src="assets/site.js?v=20261027"></script>
 </body>
 </html>

@@ -48,7 +48,9 @@ jobs:
         working-directory: .
         run: |
           node --check SofordWebsite/assets/site.js
-          node --check SofordWebsite/scripts/export-products.mjs
+          node --check SofordWebsite/assets/i18n.js
+          node --check SofordWebsite/assets/i18n-extra.js
+          node --check SofordWebsite/scripts/detail-html.mjs
           node --test SofordWebsite/tests/*.test.mjs
 
   deploy-scripts:
@@ -59,6 +61,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Shell syntax
         run: for f in deploy/*.sh deploy/backup/*.sh; do bash -n "$f"; done
+      - name: Python syntax
+        run: python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path("deploy").glob("*.py")]'
       - name: systemd units
         run: |
           # Syntax-check our units only. Runner images (e.g. ubuntu-26.04) emit noise from
