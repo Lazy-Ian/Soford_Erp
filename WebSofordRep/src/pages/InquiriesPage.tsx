@@ -144,7 +144,7 @@ function InquiryDialog({ inquiry, onClose, onSaved }: { inquiry: Inquiry; onClos
     ['国家', inquiry.country],
     ['电话', inquiry.phone],
     ['产品', inquiry.product],
-    ['Alibaba 商品 ID', inquiry.productId],
+    ['官网商品 ID', inquiry.productId],
     ['数量', inquiry.quantity],
     ['来源页面', inquiry.pageUrl],
     ['IP', inquiry.sourceIp],

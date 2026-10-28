@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using System.Text;
 
 public sealed record PriceTier(int Quantity, decimal Price);
 
@@ -102,6 +104,18 @@ public sealed class ProductRecord
     public bool HasUnpublishedChanges =>
         !string.IsNullOrWhiteSpace(RemoteProductId) && ContentUpdatedAt is not null && ContentUpdatedAt != PublishedContentAt;
 
+    public int? WebsiteSyncVersion { get; set; }
+    public WebsitePublication? WebsitePublication { get; set; }
+    public string? WebsiteStableId { get; set; }
+    public DateTimeOffset? WebsiteSyncedAt { get; set; }
+    public string? WebsiteSyncedBy { get; set; }
+    public string? WebsiteSourceHash { get; set; }
+    internal bool? WebsiteChangesForList { get; set; }
+    internal string? WebsiteIdForList { get; set; }
+    public string? WebsitePublicId => WebsiteIdForList ?? WebsitePublication?.Product.Id;
+    public bool HasWebsiteChanges => WebsiteChangesForList ?? (WebsitePublication is not null && WebsiteSourceHash != WebsiteContentHash());
+    public string WebsiteContentHash() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(ContentSignature())));
+
     public List<QualityIssue> QualityIssues { get; set; } = [];
 
     /// <summary>User id of whoever created the product here (imports from Alibaba have none).</summary>
@@ -151,6 +165,7 @@ public sealed class ProductRecord
         copy.TieredPrices = [.. TieredPrices];
         copy.QualityIssues = [.. QualityIssues];
         copy.LegacyDetailImageUrls = LegacyDetailImageUrls is null ? null : [.. LegacyDetailImageUrls];
+        copy.WebsitePublication = WebsitePublication?.Copy();
         return copy;
     }
 

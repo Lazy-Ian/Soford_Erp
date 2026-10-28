@@ -160,7 +160,7 @@ api.MapAlibabaEndpoints();
 api.MapCatalogEndpoints();
 api.MapUserEndpoints();
 app.MapInquiryEndpoints(api);
-app.MapWebsiteCatalog();
+app.MapWebsiteCatalog(api);
 app.MapWebsiteProfile(api);
 
 // The seller is redirected here by Alibaba; it must match the callback URL registered in App Console.

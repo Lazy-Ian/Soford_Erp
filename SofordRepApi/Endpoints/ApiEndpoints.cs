@@ -724,6 +724,9 @@ public static class ApiEndpoints
 
     private static ProductRecord WithoutDescription(ProductRecord product)
     {
+        product.WebsiteChangesForList = product.HasWebsiteChanges;
+        product.WebsiteIdForList = product.WebsitePublicId;
+        product.WebsitePublication = null;
         product.Description = "";
         return product;
     }

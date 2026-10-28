@@ -93,7 +93,7 @@ public class WebsiteCatalogProjectionTests
 public class WebsiteCatalogEndpointTests(ErpFactory factory) : IClassFixture<ErpFactory>
 {
     [Fact]
-    public async Task PublicCatalog_FollowsEditsInTheErpStore()
+    public async Task PublicCatalog_ChangesOnlyAfterExplicitSync_AndProtectsLastGoodPublication()
     {
         var repo = factory.Services.GetRequiredService<ProductRepository>();
         var created = await repo.CreateAsync(new ProductRecord
@@ -110,6 +110,15 @@ public class WebsiteCatalogEndpointTests(ErpFactory factory) : IClassFixture<Erp
 
         using var request = new HttpRequestMessage(HttpMethod.Get, "/public/products");
         request.Headers.Add("Origin", "http://localhost:5180");
+        var anonymous = factory.CreateClient();
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync("/api/website/catalog/sync", new { productIds = new[] { created.Id } })).StatusCode);
+        var admin = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { HandleCookies = true });
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/api/auth/login", new { username = "boss", password = ErpFactory.AdminPassword, remember = false })).StatusCode);
+        var before = await anonymous.GetFromJsonAsync<JsonElement>("/public/products");
+        Assert.DoesNotContain(before.EnumerateArray(), x => x.GetProperty("id").GetString() == "1600123456789");
+        var firstSync = await admin.PostAsJsonAsync("/api/website/catalog/sync", new { productIds = new[] { created.Id } });
+        Assert.Equal(HttpStatusCode.OK, firstSync.StatusCode);
+        Assert.Equal(1, (await firstSync.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("succeeded").GetInt32());
         var listResponse = await factory.CreateClient().SendAsync(request);
         Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
         Assert.Equal("http://localhost:5180", listResponse.Headers.GetValues("Access-Control-Allow-Origin").Single());
@@ -125,16 +134,41 @@ public class WebsiteCatalogEndpointTests(ErpFactory factory) : IClassFixture<Erp
         {
             product.Title = "Outdoor playground paver";
             product.Price = 9m;
+            product.Description = "<p>Updated details</p>";
+            product.RemoteStatus = "offline";
         });
         var edited = await factory.CreateClient().GetFromJsonAsync<JsonElement>("/public/products");
         var updated = Assert.Single(edited.EnumerateArray(), x => x.GetProperty("id").GetString() == "1600123456789");
-        Assert.Equal("Outdoor Playground Paver", updated.GetProperty("title").GetString());
-        Assert.Equal("outdoor-playground", updated.GetProperty("category").GetString());
-        Assert.Equal(9m, updated.GetProperty("priceMin").GetDecimal());
+        Assert.Equal("Gym Rubber Tile", updated.GetProperty("title").GetString());
+        Assert.Equal(12.5m, updated.GetProperty("priceMin").GetDecimal());
+        var rows = await admin.GetFromJsonAsync<JsonElement>("/api/catalog/products");
+        var row = rows.EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == created.Id);
+        Assert.True(row.GetProperty("hasWebsiteChanges").GetBoolean());
+        Assert.Equal("", row.GetProperty("description").GetString());
+        Assert.Equal(JsonValueKind.Null, row.GetProperty("websitePublication").ValueKind);
+        Assert.Equal("1600123456789", row.GetProperty("websitePublicId").GetString());
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/api/website/catalog/sync", new { productIds = new[] { created.Id } })).StatusCode);
+        var synced = await anonymous.GetFromJsonAsync<JsonElement>("/public/products");
+        var published = synced.EnumerateArray().Single(x => x.GetProperty("id").GetString() == "1600123456789");
+        Assert.Equal("Outdoor Playground Paver", published.GetProperty("title").GetString());
+        Assert.Equal(9m, published.GetProperty("priceMin").GetDecimal());
+        Assert.Contains("Updated details", (await anonymous.GetFromJsonAsync<JsonElement>("/public/products/1600123456789")).GetProperty("description").GetString());
 
-        await repo.UpdateAsync(created.Id, product => product.RemoteStatus = "offline");
+        await repo.UpdateAsync(created.Id, product => product.Description = "");
+        var invalid = await admin.PostAsJsonAsync("/api/website/catalog/sync", new { productIds = new[] { created.Id } });
+        Assert.Equal(1, (await invalid.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("failed").GetInt32());
+        Assert.Contains("Updated details", (await anonymous.GetFromJsonAsync<JsonElement>("/public/products/1600123456789")).GetProperty("description").GetString());
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/api/website/catalog/unpublish", new { productIds = new[] { created.Id } })).StatusCode);
         var hidden = await factory.CreateClient().GetFromJsonAsync<JsonElement>("/public/products");
         Assert.DoesNotContain(hidden.EnumerateArray(), x => x.GetProperty("id").GetString() == "1600123456789");
         Assert.Equal(HttpStatusCode.NotFound, (await factory.CreateClient().GetAsync("/public/products/1600123456789")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync("/api/website/catalog/sync", new { productIds = Array.Empty<Guid>() })).StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, (await admin.PostAsJsonAsync("/api/users", new { username = "web-op", password = "operator-password", role = "Operator", accountIds = Array.Empty<Guid>() })).StatusCode);
+        var op = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { HandleCookies = true });
+        Assert.Equal(HttpStatusCode.OK, (await op.PostAsJsonAsync("/api/auth/login", new { username = "web-op", password = "operator-password", remember = false })).StatusCode);
+        foreach (var action in new[] { "sync", "unpublish" })
+            Assert.Equal(HttpStatusCode.Forbidden, (await op.PostAsJsonAsync($"/api/website/catalog/{action}", new { productIds = new[] { created.Id } })).StatusCode);
     }
 }

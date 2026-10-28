@@ -20,7 +20,7 @@ const blankContact = (): WebsiteContact => ({
 
 /** Company facts and sales contacts shown on the public website. */
 export function WebsitePage() {
-  const { notify } = useApp()
+  const { notify, navigate } = useApp()
   const [profile, setProfile] = useState<WebsiteProfile | null>(null)
   const [saving, setSaving] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -101,6 +101,7 @@ export function WebsitePage() {
 
   return (
     <fieldset className="page" disabled={saving} style={{ border: 0, minWidth: 0 }}>
+      <section className="card"><strong>官网商品</strong><p>商品列表和详情在商品页一键同步，普通保存不会改变官网已同步的版本。</p><button type="button" onClick={() => navigate('products')}>去同步商品</button></section>
       <section className="card">
         <div className="card-head">
           <div>

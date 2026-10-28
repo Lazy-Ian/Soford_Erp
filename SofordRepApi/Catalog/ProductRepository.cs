@@ -67,6 +67,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
         product.CreatedAt = time.GetUtcNow();
         product.UpdatedAt = product.CreatedAt;
         product.ContentUpdatedAt ??= product.CreatedAt;
+        product.WebsiteSyncVersion = 1;
         // Store a copy: the caller keeps its instance, and the cache must not change behind the lock.
         all.Add(product.Copy());
         return product;
@@ -190,7 +191,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
                 continue;
             }
 
-            var product = new ProductRecord { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now, ContentUpdatedAt = now, CreatedBy = actor, UpdatedBy = actor };
+            var product = new ProductRecord { Id = Guid.NewGuid(), CreatedAt = now, UpdatedAt = now, ContentUpdatedAt = now, CreatedBy = actor, UpdatedBy = actor, WebsiteSyncVersion = 1 };
             product.ApplyDraft(draft);
             afterApply(product);
             all.Add(product);
@@ -241,6 +242,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
             }
 
             incoming.Id = Guid.NewGuid();
+            incoming.WebsiteSyncVersion = 1;
             incoming.CreatedAt = now;
             incoming.UpdatedAt = now;
             incoming.ContentUpdatedAt = now;
@@ -308,6 +310,31 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
         }
     }
 
+    public Task<BatchResult> SyncWebsiteAsync(Guid[] ids, bool remove, string actor) => WriteAsync(all =>
+    {
+        var lookup = all.ToDictionary(x => x.Id);
+        var results = new List<OperationItemResult>();
+        foreach (var id in ids.Distinct())
+        {
+            if (!lookup.TryGetValue(id, out var product)) { results.Add(new(id, "", false, "商品不存在或已删除")); continue; }
+            var error = remove ? null : WebsiteCatalogProjection.Validate(product);
+            if (error is not null) { results.Add(new(id, product.Sku, false, error)); continue; }
+            var publication = remove ? null : WebsiteCatalogProjection.Snapshot(product);
+            if (publication is not null && all.Any(x => x.Id != id && x.WebsitePublication?.Product.Id == publication.Product.Id))
+            {
+                results.Add(new(id, product.Sku, false, "官网商品链接与另一商品重复，请先核对 Alibaba 商品 ID")); continue;
+            }
+            product.WebsiteSyncVersion = 1;
+            product.WebsitePublication = publication;
+            if (publication is not null) product.WebsiteStableId = publication.Product.Id;
+            product.WebsiteSyncedAt = remove ? null : time.GetUtcNow();
+            product.WebsiteSyncedBy = actor;
+            product.WebsiteSourceHash = remove ? null : product.WebsiteContentHash();
+            results.Add(new(id, product.Sku, true, remove ? "已从官网下架" : "商品列表及详情已同步到官网", publication?.Product.Id, remove ? "website-unpublish" : "website-sync"));
+        }
+        return new BatchResult(results.Count, results.Count(x => x.Success), results.Count(x => !x.Success), results);
+    });
+
     private async Task<T> WriteAsync<T>(Func<List<ProductRecord>, T> change)
     {
         await _lock.WaitAsync();
@@ -344,6 +371,7 @@ public sealed class ProductRepository(AppPaths paths, TimeProvider time)
             item.MigrateLegacyFields();
         }
 
+        WebsiteCatalogProjection.InitializeLegacy(items, time.GetUtcNow());
         return _cache = items;
     }
 }

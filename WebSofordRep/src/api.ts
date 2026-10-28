@@ -36,6 +36,10 @@ export type ProductDraft = {
 }
 
 export type Product = ProductDraft & {
+  websitePublicId?: string | null
+  websiteSyncedAt?: string | null
+  websiteSyncedBy?: string | null
+  hasWebsiteChanges?: boolean
   id: string
   localState: LocalState
   publishState: PublishState

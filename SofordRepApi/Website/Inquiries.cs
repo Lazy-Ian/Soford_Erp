@@ -16,7 +16,7 @@ public sealed class Inquiry
     public string Country { get; set; } = "";
     public string Phone { get; set; } = "";
     public string Product { get; set; } = "";
-    /// <summary>Alibaba product id when the buyer started from a product page.</summary>
+    /// <summary>Stable public website product id when the buyer started from a product page.</summary>
     public string ProductId { get; set; } = "";
     public string Quantity { get; set; } = "";
     public string Message { get; set; } = "";

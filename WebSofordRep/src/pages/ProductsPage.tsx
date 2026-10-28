@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDownToLine, ArrowUpFromLine, CheckCircle2, CloudDownload, Download, FileSpreadsheet, FileText, Layers3, PackageCheck, Pencil,
-  Plus, RefreshCw, Rocket, Search, Tags, Trash2, Upload, Warehouse, DollarSign,
+  Plus, RefreshCw, Rocket, Search, Tags, Trash2, Upload, Warehouse, DollarSign, Globe,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { accountOf, api, apiUrl, errorText, post, UNAUTHORIZED_EVENT, type AlibabaAccount, type BatchResult, type ImportJob, type ImportMode, type JobKind, type Product, type ProductDraft, type PublishJob, type PublishState, type PullResult } from '../api'
@@ -11,7 +11,7 @@ import { useInitialLoad } from '../hooks'
 import { downloadUrl, formatDate, formatPrice, jobKindLabel, jobStatusLabel, publishStateLabel, publishStateTone } from '../format'
 import { ProductEditor } from './ProductEditor'
 
-type Filter = 'all' | 'incomplete' | 'ready' | 'needs-content' | 'changes' | 'missing' | 'few-keywords' | PublishState
+type Filter = 'all' | 'incomplete' | 'ready' | 'needs-content' | 'changes' | 'missing' | 'few-keywords' | 'website-changes' | 'website-visible' | 'website-hidden' | PublishState
 
 const filters: { key: Filter; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -23,6 +23,9 @@ const filters: { key: Filter; label: string }[] = [
   { key: 'changes', label: '有未发布修改' },
   { key: 'incomplete', label: '新品待完善' },
   { key: 'ready', label: '新品可发布' },
+  { key: 'website-changes', label: '官网待同步' },
+  { key: 'website-visible', label: '官网已展示' },
+  { key: 'website-hidden', label: '官网未展示' },
 ]
 
 const importModeLabel: Record<ImportMode, string> = {
@@ -50,6 +53,9 @@ function matchesFilter(item: Product, filter: Filter) {
     case 'changes': return !!item.hasUnpublishedChanges
     case 'missing': return item.remoteStatus === 'missing'
     case 'few-keywords': return published && item.keywords.length < 3
+    case 'website-changes': return !!item.hasWebsiteChanges
+    case 'website-visible': return !!item.websitePublicId
+    case 'website-hidden': return !item.websitePublicId
     default: return item.publishState === filter
   }
 }
@@ -225,6 +231,32 @@ export function ProductsPage() {
       onConfirm: () => void startJob('detail'),
     })
 
+  const syncWebsite = (remove = false) => {
+    const targets = remove || selectedIds.length ? selectedProducts : filtered
+    const ids = targets.map((item) => item.id)
+    if (!ids.length) return
+    confirm({
+      title: remove ? '从官网下架商品' : '一键同步商品到官网',
+      confirmText: remove ? '官网下架' : '确认同步',
+      message: <>
+        <p>{selectedIds.length ? '已勾选' : '当前筛选范围内全部'} {ids.length} 个商品：{remove ? '将从官网隐藏。' : '将同步商品列表信息、图片、规格、价格和详情正文。'}</p>
+        {!remove && <p>缺少标题、有效图片、价格或详情的商品会跳过，并在结果中说明原因；已有官网版本会保留。</p>}
+        <p className="muted">同步以 ERP 中已保存的内容为准。官网与 Alibaba 分别管理；普通保存不改变已同步的官网版本。</p>
+      </>,
+      onConfirm: () => void run('website-sync', async () => {
+        const result = await post<BatchResult>(`/api/website/catalog/${remove ? 'unpublish' : 'sync'}`, { productIds: ids })
+        setBatch({ title: remove ? '官网下架结果' : '官网同步结果', result })
+        notify(result.failed ? 'info' : 'success', `官网${remove ? '下架' : '同步'}完成：成功 ${result.succeeded}，未完成 ${result.failed}。`)
+        await load()
+      }),
+    })
+  }
+
+  const websiteLink = (id: string) => {
+    const base = ['localhost', '127.0.0.1'].includes(location.hostname) ? 'http://localhost:5180/' : `${location.origin}/soford/`
+    return `${base}product.html?id=${encodeURIComponent(id)}`
+  }
+
   const confirmJob = (kind: 'inventory' | 'price' | 'predict') => {
     const count = kind === 'predict' ? selectedIds.length : publishedSelected
     const message = {
@@ -363,7 +395,7 @@ export function ProductsPage() {
       title: '删除商品',
       danger: true,
       confirmText: '删除',
-      message: <p>确定删除 {ids.length} 个商品？只删除本系统中的数据，不会删除 Alibaba 上已发布的商品。此操作不可撤销。</p>,
+      message: <p>确定删除 {ids.length} 个商品？本系统数据及对应官网商品将移除，不会删除 Alibaba 上已发布的商品。此操作不可撤销。</p>,
       onConfirm: () =>
         void run('delete', async () => {
           await post('/api/catalog/products/batch-delete', { productIds: ids })
@@ -391,7 +423,7 @@ export function ProductsPage() {
 
       {needsAlibaba && (
         <div className="banner warn">
-          <span>Alibaba 店铺尚未连接，发布、类目预测、同步等功能暂不可用。{user?.isAdmin ? '' : '请联系管理员。'}</span>
+          <span>Alibaba 店铺尚未连接，Alibaba 商品发布、类目预测和价格库存同步暂不可用。{user?.isAdmin ? '' : '请联系管理员。'}</span>
           {user?.isAdmin && <button type="button" onClick={() => navigate('connection')}>去连接店铺</button>}
         </div>
       )}
@@ -423,6 +455,10 @@ export function ProductsPage() {
         </div>
         <div className="actions">
           <button type="button" onClick={() => setEditing('new')}><Plus size={16} /> 新建</button>
+          {user?.isAdmin && <button type="button" className="primary" onClick={() => syncWebsite()} disabled={loading || busy !== null || filtered.length === 0}
+            title={selectedIds.length ? '同步勾选商品的列表信息及详情到官网' : '同步当前筛选范围内全部商品到官网'}>
+            {busy === 'website-sync' ? <Spinner /> : <Globe size={16} />} 一键同步官网
+          </button>}
           {user?.isAdmin && (
             <button type="button" onClick={pullFromAlibaba} disabled={busy !== null || needsAlibaba} title={alibabaHint ?? '把 Alibaba 店铺中已有的商品导入到本系统'}>
               {busy === 'pull' ? <Spinner /> : <CloudDownload size={16} />} 从 Alibaba 导入
@@ -503,6 +539,7 @@ export function ProductsPage() {
             {accounts.filter((a) => a.authorized).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         )}
+        {user?.isAdmin && <button type="button" onClick={() => syncWebsite(true)} disabled={none || busy !== null}><Globe size={16} /> 官网下架</button>}
         <button type="button" className="danger-text" onClick={() => remove(selectedIds)} disabled={none || busy !== null}><Trash2 size={16} /> 删除</button>
       </section>
 
@@ -543,6 +580,7 @@ export function ProductsPage() {
               <th className="col-num">库存</th>
               <th className="col-state">质检</th>
               <th className="col-state">Alibaba 状态</th>
+              <th className="col-state">官网</th>
               <th className="col-actions" />
             </tr>
           </thead>
@@ -593,6 +631,11 @@ export function ProductsPage() {
                     {item.hasUnpublishedChanges && <Pill tone="warn">有未发布的修改</Pill>}
                     {variants > 0 && <Pill tone="neutral">{variants} 个规格</Pill>}
                     {item.remoteStatusMessage && <small className="muted clip" title={item.remoteStatusMessage}>{item.remoteStatusMessage}</small>}
+                  </td>
+                  <td className="col-state">
+                    <Pill tone={item.websitePublicId ? item.hasWebsiteChanges ? 'warn' : 'good' : 'neutral'}>{item.websitePublicId ? item.hasWebsiteChanges ? '待同步修改' : '已同步' : '未展示'}</Pill>
+                    {item.websiteSyncedAt && <small className="muted">{formatDate(item.websiteSyncedAt)}</small>}
+                    {item.websitePublicId && <a className="link" href={websiteLink(item.websitePublicId)} target="_blank" rel="noopener noreferrer">查看官网</a>}
                   </td>
                   <td className="col-actions row-actions">
                     <button type="button" className="icon" aria-label="编辑" title="编辑" onClick={() => void openEditor(item)}><Pencil size={15} /></button>

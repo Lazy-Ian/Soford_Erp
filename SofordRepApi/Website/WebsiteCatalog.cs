@@ -1,8 +1,9 @@
 using System.Text.RegularExpressions;
+using System.Security.Claims;
 
 /// <summary>
 /// Public website view of the ERP product store. The site reads this instead of a second exported copy.
-/// Online listings that have an image. Title cleaning and detail HTML follow the public-site rules.
+/// Explicitly synchronized card/detail versions remain in the same product store.
 /// </summary>
 public sealed class WebsiteCatalog(ProductRepository products)
 {
@@ -34,7 +35,7 @@ public sealed class WebsiteCatalog(ProductRepository products)
     public async Task<string?> DescriptionAsync(string id)
     {
         var product = WebsiteCatalogProjection.Find(await products.GetAllAsync(), id);
-        return product is null ? null : WebsiteCatalogProjection.SanitizeDetail(product.Description);
+        return product is null ? null : product.WebsitePublication?.Description ?? WebsiteCatalogProjection.SanitizeDetail(product.Description);
     }
 }
 
@@ -50,7 +51,15 @@ public sealed record WebsiteProduct(
     int Moq,
     int LeadTimeDays,
     string[] Keywords,
-    string[][] Specs);
+    string[][] Specs)
+{
+    public WebsiteProduct Copy() => this with { Images = [.. Images], Keywords = [.. Keywords], Specs = Specs.Select(x => x.ToArray()).ToArray() };
+}
+
+public sealed record WebsitePublication(WebsiteProduct Product, string Description)
+{
+    public WebsitePublication Copy() => new(Product.Copy(), Description);
+}
 
 public static class WebsiteCatalogProjection
 {
@@ -109,7 +118,40 @@ public static class WebsiteCatalogProjection
     };
 
     public static IReadOnlyList<WebsiteProduct> Project(IEnumerable<ProductRecord> source) =>
-        Select(source).Select(ToProduct).ToList();
+        Select(source).Select(x => x.WebsitePublication?.Product.Copy() ?? ToProduct(x)).ToList();
+
+    public static WebsitePublication Snapshot(ProductRecord product) => new(ToProduct(product), SanitizeDetail(product.Description));
+
+    public static void InitializeLegacy(List<ProductRecord> products, DateTimeOffset now)
+    {
+        var legacy = products.Where(x => x.WebsiteSyncVersion is null).ToList();
+        var visible = Select(legacy).Select(x => x.Id).ToHashSet();
+        foreach (var product in legacy)
+        {
+            if (visible.Contains(product.Id))
+            {
+                product.WebsitePublication = Snapshot(product);
+                product.WebsiteStableId = product.WebsitePublication.Product.Id;
+                product.WebsiteSyncedAt = now;
+                product.WebsiteSyncedBy = "系统迁移";
+                product.WebsiteSourceHash = product.WebsiteContentHash();
+            }
+            product.WebsiteSyncVersion = 1;
+        }
+    }
+
+    public static string? Validate(ProductRecord product)
+    {
+        if (string.IsNullOrWhiteSpace(CleanTitle(product.Title ?? ""))) return "请先填写商品标题";
+        if (product.Images.Length == 0 || product.Images.Any(x => !Uri.TryCreate(ImageUrl(x), UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))) return "请先补全有效的商品图片";
+        var detail = SanitizeDetail(product.Description);
+        if (string.IsNullOrWhiteSpace(detail) || (!Regex.IsMatch(detail, @"<img\b", RegexOptions.IgnoreCase) && string.IsNullOrWhiteSpace(Regex.Replace(detail, "<[^>]*>|&nbsp;", "", RegexOptions.IgnoreCase)))) return "详情为空，请先编辑描述或拉取详情";
+        if (product.MinimumOrderQuantity <= 0) return "起订量必须大于 0";
+        if ((product.TieredPrices.Count == 0 && product.Price <= 0) || product.TieredPrices.Any(x => x.Price <= 0 || x.Quantity <= 0)) return "请先填写有效价格";
+        if (!Regex.IsMatch(product.Currency, "^[A-Z]{3}$")) return "币种需要三位大写代码";
+        if (string.IsNullOrWhiteSpace(product.Unit) || product.Unit.Length > 80 || product.Unit.IndexOfAny(['<', '>']) >= 0) return "请填写有效销售单位";
+        return null;
+    }
 
     public static ProductRecord? Find(IEnumerable<ProductRecord> source, string id)
     {
@@ -147,6 +189,11 @@ public static class WebsiteCatalogProjection
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var product in source)
         {
+            if (product.WebsiteSyncVersion is not null)
+            {
+                if (product.WebsitePublication is not null) yield return product;
+                continue;
+            }
             if (!string.Equals(product.RemoteStatus, "online", StringComparison.OrdinalIgnoreCase)) continue;
             if (product.Images is not { Length: > 0 }) continue;
             var key = DedupeKey.Replace(CleanTitle(Whitespace.Replace(product.Title ?? "", " ").Trim()).ToLowerInvariant(), " ").Trim();
@@ -197,7 +244,7 @@ public static class WebsiteCatalogProjection
     }
 
     public static string PublicId(ProductRecord product) =>
-        string.IsNullOrWhiteSpace(product.RemoteProductId) ? product.Id.ToString("D") : product.RemoteProductId.Trim();
+        product.WebsiteStableId ?? product.WebsitePublication?.Product.Id ?? (string.IsNullOrWhiteSpace(product.RemoteProductId) ? product.Id.ToString("D") : product.RemoteProductId.Trim());
 
     private static string CategoryOf(string title)
     {
@@ -240,8 +287,21 @@ public static class WebsiteCatalogProjection
 
 public static class WebsiteCatalogEndpoints
 {
-    public static void MapWebsiteCatalog(this WebApplication app)
+    public static void MapWebsiteCatalog(this WebApplication app, RouteGroupBuilder api)
     {
+        var management = api.MapGroup("/website/catalog").RequireAuthorization(ApiEndpoints.AdminPolicy);
+        foreach (var action in new[] { "sync", "unpublish" })
+        {
+            var remove = action == "unpublish";
+            management.MapPost($"/{action}", async (IdsRequest request, ProductRepository products, ClaimsPrincipal principal, AccessService access, AuditLog audit) =>
+            {
+                if (request.Ids.Length is < 1 or > 5000) return ApiEndpoints.Problem("请选择 1 到 5000 个商品");
+                var user = await access.CurrentAsync(principal);
+                var result = await products.SyncWebsiteAsync(request.Ids, remove, user!.Name);
+                await audit.RecordAsync(user, remove ? "官网下架" : "同步商品到官网", $"成功 {result.Succeeded}，未完成 {result.Failed}", result.Succeeded);
+                return Results.Ok(result);
+            });
+        }
         app.MapGet("/public/products", async (HttpContext http, WebsiteCatalog catalog) =>
         {
             http.Response.Headers.CacheControl = "no-cache";

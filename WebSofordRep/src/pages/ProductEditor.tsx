@@ -255,6 +255,7 @@ export function ProductEditor({ product, saving, onClose, onSave }: {
             </label>
             <label className="span4">描述 *（支持 HTML）
               <textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={4} />
+              <small className="muted">保存后，在商品列表点击「一键同步官网」更新官网列表和详情。</small>
             </label>
             <label className="span3">关键词（用 ; 或换行分隔，最多 10 个）
               <input value={keywordText} onChange={(e) => setKeywordText(e.target.value)} placeholder="bluetooth speaker; portable speaker" />
